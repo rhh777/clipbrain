@@ -1,0 +1,9 @@
+pub mod action_cmds;
+pub mod clipboard_cmds;
+pub mod config_cmds;
+pub mod history_cmds;
+pub mod model_cmds;
+pub mod model_mgmt_cmds;
+pub mod plugin_cmds;
+pub mod stats_cmds;
+pub mod tag_cmds;
