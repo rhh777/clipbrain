@@ -99,7 +99,7 @@
     "thinkingTooltipOn": "Deep thinking mode enabled, click to switch to fast mode",
     "thinkingTooltipOff": "Fast mode enabled, click to switch to deep thinking mode",
     "customAction": "Custom Action",
-    "customPlaceholder": "Enter your request, e.g.: translate to Japanese, extract keywords\u2026",
+    "customPlaceholder": "Enter your request, e.g.: translate to Chinese, extract keywords\u2026",
     "customSend": "Send",
     "filePreviewTitle": "File Preview",
     "filePreviewCount": "{{n}} files",

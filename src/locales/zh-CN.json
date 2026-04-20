@@ -99,7 +99,7 @@
     "thinkingTooltipOn": "当前为深度思考模式，点击切换为快速模式",
     "thinkingTooltipOff": "当前为快速模式，点击切换为深度思考模式",
     "customAction": "自定义操作",
-    "customPlaceholder": "输入你的要求，如：翻译成日文、提取关键词…",
+    "customPlaceholder": "输入你的要求，如：翻译成中文、提取关键词…",
     "customSend": "发送",
     "filePreviewTitle": "文件预览",
     "filePreviewCount": "{{n}} 个文件",
