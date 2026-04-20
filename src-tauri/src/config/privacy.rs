@@ -59,8 +59,18 @@ fn contains_sensitive_patterns(content: &str) -> bool {
 #[cfg(target_os = "macos")]
 fn get_frontmost_app() -> Option<String> {
     use std::process::Command;
+    let script = r#"try
+    tell application "System Events"
+        set frontApp to first application process whose frontmost is true
+        return name of application file of frontApp
+    end tell
+on error
+    tell application "System Events"
+        return name of first application process whose frontmost is true
+    end tell
+end try"#;
     let output = Command::new("osascript")
-        .args(["-e", "tell application \"System Events\" to get name of first application process whose frontmost is true"])
+        .args(["-e", script])
         .output()
         .ok()?;
     if output.status.success() {

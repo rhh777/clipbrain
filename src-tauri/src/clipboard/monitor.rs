@@ -12,11 +12,23 @@ use crate::config::{manager as config_manager, privacy};
 use crate::storage::clipboard_history;
 
 /// 获取当前前台应用名称（macOS）
+/// 优先返回 .app bundle 的显示名（如 "IntelliJ IDEA"），回退到进程名。
 #[cfg(target_os = "macos")]
 fn get_frontmost_app() -> Option<String> {
+    // 先尝试获取 bundle 显示名（name of application file），更准确
+    let script = r#"try
+    tell application "System Events"
+        set frontApp to first application process whose frontmost is true
+        return name of application file of frontApp
+    end tell
+on error
+    tell application "System Events"
+        return name of first application process whose frontmost is true
+    end tell
+end try"#;
     let output = std::process::Command::new("osascript")
         .arg("-e")
-        .arg("tell application \"System Events\" to get name of first application process whose frontmost is true")
+        .arg(script)
         .output()
         .ok()?;
     if output.status.success() {

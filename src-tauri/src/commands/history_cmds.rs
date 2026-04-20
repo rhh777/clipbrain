@@ -171,32 +171,7 @@ pub fn get_app_icon(app_name: String) -> Result<String, String> {
 
     #[cfg(target_os = "macos")]
     {
-        // 通过常见路径或 mdfind 查找 app
-        let app_path = find_app_path(&app_name)?;
-        let icns_path = find_icns_path(&app_path)?;
-
-        // 使用 sips 转换为 32x32 PNG
-        let output = std::process::Command::new("sips")
-            .args([
-                "-s",
-                "format",
-                "png",
-                "-z",
-                "32",
-                "32",
-                &icns_path,
-                "--out",
-                png_path.to_str().unwrap_or_default(),
-            ])
-            .output()
-            .map_err(|e| format!("sips 执行失败: {}", e))?;
-
-        if !output.status.success() {
-            return Err(format!(
-                "sips 转换失败: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
+        extract_app_icon_via_nsworkspace(&app_name, &png_path)?;
 
         let result = png_to_data_url(&png_path);
         log::warn!(
@@ -426,78 +401,74 @@ fn image_mime_for_extension(extension: Option<&str>) -> Option<&'static str> {
     }
 }
 
+/// 通过 osascript Cocoa 桥接（NSWorkspace）查找 app 并导出 32×32 PNG。
+/// 无需任何外部依赖，支持 JetBrains Toolbox 符号链接、Asset Catalog 图标等所有情况。
 #[cfg(target_os = "macos")]
-fn find_app_path(app_name: &str) -> Result<String, String> {
-    // 优先在 /Applications 和 /System/Applications 查找
-    for base in &[
-        "/Applications",
-        "/System/Applications",
-        "/System/Applications/Utilities",
-    ] {
-        let path = format!("{}/{}.app", base, app_name);
-        if std::path::Path::new(&path).exists() {
-            return Ok(path);
-        }
-    }
+fn extract_app_icon_via_nsworkspace(app_name: &str, png_path: &std::path::Path) -> Result<(), String> {
+    // AppleScript 里双引号用 \" 转义，反斜杠用 \\
+    let escaped_name = app_name.replace('\\', "\\\\").replace('"', "\\\"");
+    let escaped_out = png_path
+        .to_str()
+        .unwrap_or_default()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
 
-    // 回退到 mdfind
-    let output = std::process::Command::new("mdfind")
-        .arg(format!(
-            "kMDItemKind == 'Application' && kMDItemDisplayName == '{}'",
-            app_name
-        ))
+    let script = format!(
+        r#"use framework "AppKit"
+use framework "Foundation"
+use scripting additions
+
+set appName to "{name}"
+set outPath to "{out}"
+set ws to current application's NSWorkspace's sharedWorkspace()
+
+-- 策略1: 按显示名或 .app 名查找（适用于新记录，如 "IntelliJ IDEA.app"、"Sublime Text"）
+set appPath to ws's fullPathForApplication_(appName)
+
+-- 策略2: Spotlight 按 executable 名查找
+if appPath is missing value then
+    try
+        set mdfindOut to do shell script "mdfind 'kMDItemCFBundleExecutable == \"" & appName & "\"' 2>/dev/null | grep -m1 '\\.app'"
+        if mdfindOut is not "" then set appPath to mdfindOut
+    end try
+end if
+
+-- 策略3: 遍历 /Applications 检查 CFBundleExecutable（处理子目录和符号链接未被 Spotlight 索引的情况）
+if appPath is missing value then
+    try
+        set findOut to do shell script "find /Applications ~/Applications /System/Applications 2>/dev/null -maxdepth 3 -name '*.app' | while IFS= read -r a; do e=$(defaults read \"$a/Contents/Info.plist\" CFBundleExecutable 2>/dev/null); [ \"$e\" = \"" & appName & "\" ] && echo \"$a\" && break; done"
+        if findOut is not "" then set appPath to findOut
+    end try
+end if
+
+if appPath is missing value or appPath = "" then error "app not found: " & appName
+
+set icon to ws's iconForFile_(appPath)
+icon's setSize_({{32, 32}})
+set tiff to icon's TIFFRepresentation()
+set bmp to current application's NSBitmapImageRep's imageRepWithData_(tiff)
+set png to bmp's representationUsingType_properties_(current application's NSBitmapImageFileTypePNG, missing value)
+png's writeToFile_atomically_(outPath, true)"#,
+        name = escaped_name,
+        out = escaped_out
+    );
+
+    let output = std::process::Command::new("osascript")
+        .args(["-e", &script])
         .output()
-        .map_err(|e| format!("mdfind 执行失败: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout
-        .lines()
-        .next()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("未找到应用: {}", app_name))
-}
-
-#[cfg(target_os = "macos")]
-fn find_icns_path(app_path: &str) -> Result<String, String> {
-    let plist_path = format!("{}/Contents/Info.plist", app_path);
-
-    // 使用 defaults read 获取图标文件名
-    let output = std::process::Command::new("defaults")
-        .args(["read", &plist_path, "CFBundleIconFile"])
-        .output()
-        .map_err(|e| format!("defaults read 失败: {}", e))?;
+        .map_err(|e| format!("osascript 执行失败: {}", e))?;
 
     if !output.status.success() {
-        // 回退：查找 Resources 目录下的 .icns 文件
-        let resources = format!("{}/Contents/Resources", app_path);
-        if let Ok(entries) = std::fs::read_dir(&resources) {
-            for entry in entries.flatten() {
-                if let Some(ext) = entry.path().extension() {
-                    if ext == "icns" {
-                        return entry
-                            .path()
-                            .to_str()
-                            .map(|s| s.to_string())
-                            .ok_or_else(|| "路径转换失败".to_string());
-                    }
-                }
-            }
-        }
-        return Err("未找到应用图标".to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "NSWorkspace 图标提取失败: {}",
+            stderr.trim()
+        ));
     }
 
-    let icon_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let icon_file = if icon_name.ends_with(".icns") {
-        icon_name
-    } else {
-        format!("{}.icns", icon_name)
-    };
-    let full_path = format!("{}/Contents/Resources/{}", app_path, icon_file);
-
-    if std::path::Path::new(&full_path).exists() {
-        Ok(full_path)
-    } else {
-        Err(format!("图标文件不存在: {}", full_path))
+    if !png_path.exists() {
+        return Err("图标文件未生成".to_string());
     }
+
+    Ok(())
 }
