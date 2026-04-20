@@ -2,7 +2,7 @@
 
 > 本地优先的 AI 剪贴板助手 —— 基于 Tauri 2 + SolidJS + Rust 构建的 macOS 桌面应用。
 
-ClipBrain 会在后台监听剪贴板，自动识别内容类型（URL / 代码 / JSON / 表格 / 图片等），并提供对应的 AI 操作：翻译、摘要、格式化、解释、OCR、敏感信息脱敏等。所有历史数据本地 SQLite 存储，API Key 通过系统 Keychain 管理，隐私可控。
+ClipBrain 会在后台监听剪贴板，自动识别内容类型（URL / 代码 / JSON / 表格 / 图片等），并提供对应的处理动作：翻译、摘要、格式化、解释、敏感信息脱敏等；在配置支持视觉的 OpenAI-compatible 模型后，还可对图片执行 OCR、图片描述，以及围绕图片内容发起自定义问答。所有历史数据本地 SQLite 存储，API Key 通过系统 Keychain 管理，隐私可控。
 
 <p align="center">
   <img src="docs/clip_history.png" alt="剪贴板历史面板" width="720" />
@@ -15,9 +15,9 @@ ClipBrain 会在后台监听剪贴板，自动识别内容类型（URL / 代码 
 
 - **剪贴板历史**：自动捕获文本 / 图片 / 文件，支持标签、搜索、时间范围过滤
 - **智能分类**：基于规则 + 可选 LLM 识别内容类型
-- **AI 动作**：内置 URL 预览、JSON/YAML 格式化、数学计算、Markdown 表格互转、敏感字段脱敏、LLM 问答、视觉 OCR 等
-- **插件化动作**：支持通过 YAML + Prompt 声明自定义 AI 动作
-- **多模型后端**：统一 trait 抽象，可接入 OpenAI / Claude / 本地 llama.cpp / MLX 等
+- **AI 动作**：内置 URL 预览、JSON/YAML 格式化、数学计算、Markdown 表格互转、敏感字段脱敏、LLM 文本处理；图片项在配置视觉模型后支持 OCR、图片描述和自定义图片问答
+- **插件化动作**：支持通过 `plugin.toml` + Prompt 声明自定义 AI 动作
+- **模型接入**：当前通过 OpenAI-compatible 接口接入远程或本地模型服务（如 OpenAI 兼容网关、Ollama 等）
 - **macOS 原生 NSPanel**：覆盖式悬浮面板，无焦点切换、无 Dock 图标干扰
 - **全局快捷键**：一键唤起，支持自定义
 - **隐私优先**：默认本地处理；发往远程模型前可配置脱敏规则

@@ -491,6 +491,7 @@ pub fn run() {
             commands::action_cmds::list_actions,
             commands::action_cmds::execute_action,
             commands::action_cmds::execute_action_stream,
+            commands::action_cmds::stop_action_stream,
             commands::config_cmds::get_config,
             commands::config_cmds::save_config,
             commands::config_cmds::reload_config,

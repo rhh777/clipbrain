@@ -9,6 +9,7 @@ export type ContentType =
   | { type: "MathExpression" }
   | { type: "Code"; detail: string }
   | { type: "TableData"; detail: string }
+  | { type: "Image" }
   | { type: "FileList" }
   | { type: "PlainText" }
   | { type: "Unknown" };
@@ -53,7 +54,7 @@ export interface ClipboardChangeEvent {
 
 /** 流式操作事件 payload */
 export interface ActionStreamPayload {
-  event_type: "start" | "thinking" | "delta" | "done" | "error";
+  event_type: "start" | "thinking" | "delta" | "done" | "error" | "cancelled";
   action_id: string;
   content: string;
   result_type: string;
@@ -71,6 +72,7 @@ export function contentTypeLabel(ct: ContentType): string {
     MathExpression: "数学表达式",
     Code: "代码",
     TableData: "表格",
+    Image: "图片",
     FileList: "文件",
     PlainText: "文本",
     Unknown: "未知",
@@ -90,6 +92,7 @@ export function contentTypeColor(ct: ContentType): string {
     MathExpression: "bg-purple-500/20 text-purple-400",
     Code: "bg-emerald-500/20 text-emerald-400",
     TableData: "bg-teal-500/20 text-teal-400",
+    Image: "bg-pink-500/20 text-pink-400",
     FileList: "bg-indigo-500/20 text-indigo-400",
     PlainText: "bg-gray-500/20 text-gray-400",
     Unknown: "bg-gray-500/20 text-gray-400",

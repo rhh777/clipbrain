@@ -1,6 +1,6 @@
 import { Component, createSignal, For, Show, onMount, onCleanup } from "solid-js";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { executeAction, executeActionStream, writeToClipboard } from "../lib/ipc";
+import { executeAction, executeActionStream, stopActionStream, writeToClipboard } from "../lib/ipc";
 import type {
   ClipboardChangeEvent,
   ActionDescriptor,
@@ -50,6 +50,7 @@ const ClipboardPanel: Component<ClipboardPanelProps> = (props) => {
   const handleAction = async (action: ActionDescriptor) => {
     const ev = clipEvent();
     if (!ev) return;
+    const actionInput = ev.item?.image_path ?? ev.content;
 
     setExecuting(action.id);
     setResult(null);
@@ -75,13 +76,28 @@ const ClipboardPanel: Component<ClipboardPanelProps> = (props) => {
             case "delta":
               setStreamContent((prev) => prev + p.content);
               break;
+            case "done":
+            case "error":
+              setStreaming(false);
+              setExecuting(null);
+              break;
+            case "cancelled":
+              if (streamContent()) {
+                setResult({ result: streamContent(), result_type: "text" });
+              }
+              setStreaming(false);
+              setExecuting(null);
+              break;
           }
         });
 
-        const output = await executeActionStream(action.id, ev.content, ev.content_type);
+        const output = await executeActionStream(action.id, actionInput, ev.content_type);
         setResult(output);
       } catch (e: any) {
-        setError(typeof e === "string" ? e : e?.message ?? t("clipboard.actionFailed"));
+        const message = typeof e === "string" ? e : e?.message ?? t("clipboard.actionFailed");
+        if (message !== "操作已取消") {
+          setError(message);
+        }
       } finally {
         unlistenStream?.();
         setStreaming(false);
@@ -90,7 +106,7 @@ const ClipboardPanel: Component<ClipboardPanelProps> = (props) => {
     } else {
       // 非模型操作：直接执行
       try {
-        const output = await executeAction(action.id, ev.content, ev.content_type);
+        const output = await executeAction(action.id, actionInput, ev.content_type);
         setResult(output);
       } catch (e: any) {
         setError(typeof e === "string" ? e : e?.message ?? t("clipboard.actionFailed"));
@@ -110,6 +126,19 @@ const ClipboardPanel: Component<ClipboardPanelProps> = (props) => {
     } catch {
       // ignore
     }
+  };
+
+  const handleStopStreaming = async () => {
+    const actionId = executing();
+    if (!actionId) return;
+    try {
+      await stopActionStream(actionId);
+    } catch {}
+    if (streamContent()) {
+      setResult({ result: streamContent(), result_type: "text" });
+    }
+    setStreaming(false);
+    setExecuting(null);
   };
 
   return (
@@ -253,12 +282,24 @@ const ClipboardPanel: Component<ClipboardPanelProps> = (props) => {
                         </span>
                       </Show>
                     </div>
-                    <Show when={!streaming() || streamContent()}>
+                    <Show
+                      when={streaming()}
+                      fallback={
+                        <Show when={!streaming() || streamContent()}>
+                          <button
+                            class="text-[12px] px-2 py-1 rounded bg-[var(--cb-blue-bg)] text-[var(--cb-blue-text)] hover:opacity-80 transition-colors"
+                            onClick={handleCopy}
+                          >
+                            {copied() ? t("common.copied") : t("clipboard.copyResult")}
+                          </button>
+                        </Show>
+                      }
+                    >
                       <button
-                        class="text-[12px] px-2 py-1 rounded bg-[var(--cb-blue-bg)] text-[var(--cb-blue-text)] hover:opacity-80 transition-colors"
-                        onClick={handleCopy}
+                        class="text-[12px] px-2 py-1 rounded bg-[var(--cb-red-bg)] text-[var(--cb-red-text)] hover:opacity-80 transition-colors"
+                        onClick={handleStopStreaming}
                       >
-                        {copied() ? t("common.copied") : t("clipboard.copyResult")}
+                        {t("common.cancel")}
                       </button>
                     </Show>
                   </div>

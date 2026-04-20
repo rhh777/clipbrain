@@ -66,13 +66,18 @@ export async function executeActionStream(
   return invoke("execute_action_stream", { actionId, content, contentType, thinking: thinking ?? null });
 }
 
+export async function stopActionStream(actionId: string): Promise<void> {
+  return invoke("stop_action_stream", { actionId });
+}
+
 /** 流式执行自定义操作（用户输入自定义 prompt） */
 export async function executeCustomStream(
   content: string,
+  contentType: ContentType,
   prompt: string,
   thinking?: boolean
 ): Promise<ActionOutput> {
-  return invoke("execute_custom_stream", { content, prompt, thinking: thinking ?? null });
+  return invoke("execute_custom_stream", { content, contentType, prompt, thinking: thinking ?? null });
 }
 
 // --- 模型配置 ---

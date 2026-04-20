@@ -3,11 +3,29 @@ use crate::classifier::rules::ContentType;
 use crate::model::backend::{ImageUrlDetail, VisionContentPart, VisionMessage};
 use crate::model::state;
 use async_trait::async_trait;
+use image::imageops::FilterType;
+use image::{GenericImageView, ImageFormat, ImageReader};
+use std::io::Cursor;
 use std::time::Duration;
 
 /// 读取图片文件并返回 base64 data URL
-fn image_path_to_data_url(path: &str) -> Result<String, String> {
-    let data = std::fs::read(path).map_err(|e| format!("Failed to read image: {}", e))?;
+pub fn image_path_to_data_url(path: &str) -> Result<String, String> {
+    let mut data = std::fs::read(path).map_err(|e| format!("Failed to read image: {}", e))?;
+
+    const MAX_EDGE: u32 = 1280;
+    let mut img = ImageReader::open(path)
+        .map_err(|e| format!("Failed to open image: {}", e))?
+        .decode()
+        .map_err(|e| format!("Failed to decode image: {}", e))?;
+
+    let (width, height) = img.dimensions();
+    if width > MAX_EDGE || height > MAX_EDGE {
+        img = img.resize(MAX_EDGE, MAX_EDGE, FilterType::Triangle);
+        let mut encoded = Cursor::new(Vec::new());
+        img.write_to(&mut encoded, ImageFormat::Png)
+            .map_err(|e| format!("Failed to encode image: {}", e))?;
+        data = encoded.into_inner();
+    }
 
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
@@ -33,7 +51,7 @@ fn image_path_to_data_url(path: &str) -> Result<String, String> {
 }
 
 /// 构建视觉消息：system prompt + 图片 + 用户文本
-fn build_vision_messages(
+pub fn build_vision_messages(
     system_prompt: &str,
     image_data_url: &str,
     user_text: &str,
@@ -144,11 +162,11 @@ impl Action for ImageDescribeAction {
     async fn execute(&self, input: ActionInput) -> Result<ActionOutput, String> {
         let image_url = image_path_to_data_url(&input.content)?;
         let messages = build_vision_messages(
-            "你是一个图片描述助手。请详细描述图片中的内容，包括主要对象、场景、颜色、布局等。",
+            "你是一个图片描述助手。请准确描述图片中的主体、场景、文字、界面结构和关键信息，避免编造看不清的细节。",
             &image_url,
-            "请详细描述这张图片的内容。",
+            "请描述这张图片的内容。",
         );
-        let resp = state::vision_chat(messages, None, Some(0.5)).await?;
+        let resp = state::vision_chat(messages, Some(768), Some(0.2)).await?;
         Ok(ActionOutput {
             result: resp.content,
             result_type: "text".to_string(),
@@ -157,54 +175,5 @@ impl Action for ImageDescribeAction {
 
     fn estimated_duration(&self) -> Duration {
         Duration::from_secs(10)
-    }
-}
-
-// ===== 截图表格提取 =====
-
-pub struct ImageTableExtractAction;
-
-#[async_trait]
-impl Action for ImageTableExtractAction {
-    fn id(&self) -> &str {
-        "image_table_extract"
-    }
-    fn display_name(&self) -> &str {
-        "截图表格提取"
-    }
-    fn display_name_en(&self) -> &str {
-        "Extract Table from Image"
-    }
-    fn description(&self) -> &str {
-        "从截图中提取表格数据为 Markdown 格式"
-    }
-    fn description_en(&self) -> &str {
-        "Extract table data from screenshot as Markdown"
-    }
-
-    fn supported_types(&self) -> Vec<ContentType> {
-        vec![ContentType::Image]
-    }
-
-    fn requires_model(&self) -> bool {
-        true
-    }
-
-    async fn execute(&self, input: ActionInput) -> Result<ActionOutput, String> {
-        let image_url = image_path_to_data_url(&input.content)?;
-        let messages = build_vision_messages(
-            "你是一个表格提取专家。请从图片中识别表格数据，并输出为 Markdown 表格格式。如果图片中没有表格，请说明。只输出 Markdown 表格，不要添加解释。",
-            &image_url,
-            "请提取这张图片中的表格数据。",
-        );
-        let resp = state::vision_chat(messages, None, Some(0.2)).await?;
-        Ok(ActionOutput {
-            result: resp.content,
-            result_type: "markdown".to_string(),
-        })
-    }
-
-    fn estimated_duration(&self) -> Duration {
-        Duration::from_secs(15)
     }
 }

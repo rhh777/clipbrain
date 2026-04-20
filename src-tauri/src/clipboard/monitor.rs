@@ -308,10 +308,10 @@ impl ClipboardMonitor {
                                 .as_millis() as u64;
 
                             let event = ClipboardChangeEvent {
-                                content: format!("[Image {}x{}]", width, height),
-                                content_type: ContentType::PlainText, // 前端会通过 image_path 判断
+                                content: image_path.clone(),
+                                content_type: ContentType::Image,
                                 preview: format!("[Image {}x{}]", width, height),
-                                actions: vec![],
+                                actions: list_actions_for_type(&ContentType::Image, "zh-CN"),
                                 timestamp,
                                 item,
                             };

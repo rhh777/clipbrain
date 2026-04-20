@@ -157,18 +157,35 @@ impl InferenceBackend for OpenAICompatClient {
             "temperature": request.temperature.unwrap_or(0.3),
         });
 
-        let mut req_builder = self.client.post(&url).json(&body);
+        let mut last_err = None;
+        let mut resp = None;
+        for _attempt in 0..2 {
+            let mut req_builder = self.client.post(&url).json(&body);
 
-        if let Some(ref key) = self.config.api_key {
-            if !key.is_empty() {
-                req_builder = req_builder.header("Authorization", format!("Bearer {}", key));
+            if let Some(ref key) = self.config.api_key {
+                if !key.is_empty() {
+                    req_builder = req_builder.header("Authorization", format!("Bearer {}", key));
+                }
+            }
+
+            match req_builder.send().await {
+                Ok(ok) => {
+                    resp = Some(ok);
+                    break;
+                }
+                Err(err) => {
+                    last_err = Some(err);
+                }
             }
         }
-
-        let resp = req_builder
-            .send()
-            .await
-            .map_err(|e| format!("Vision request failed: {}", e))?;
+        let resp = resp.ok_or_else(|| {
+            format!(
+                "Vision request failed: {}",
+                last_err
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "unknown transport error".to_string())
+            )
+        })?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -255,6 +272,7 @@ impl InferenceBackend for OpenAICompatClient {
         let mut full_thinking = String::new();
         let mut model_name = self.config.model.clone();
         let mut buf = String::new();
+        let mut finished = false;
 
         let mut stream = resp.bytes_stream();
         while let Some(chunk_result) = stream.next().await {
@@ -289,8 +307,19 @@ impl InferenceBackend for OpenAICompatClient {
                                 }
                             }
                         }
+                        if !chunk_data.choices.is_empty()
+                            && chunk_data
+                                .choices
+                                .iter()
+                                .all(|choice| choice.finish_reason.is_some())
+                        {
+                            finished = true;
+                        }
                     }
                 }
+            }
+            if finished {
+                break;
             }
         }
 

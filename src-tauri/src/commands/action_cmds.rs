@@ -1,4 +1,5 @@
 use crate::actions::builtin::register_builtin_actions;
+use crate::actions::builtin::vision_actions::{build_vision_messages, image_path_to_data_url};
 use crate::actions::plugin::loader;
 use crate::actions::registry::ActionRegistry;
 use crate::actions::traits::{ActionDescriptor, ActionInput, ActionOutput};
@@ -6,6 +7,7 @@ use crate::classifier::rules::{classify_by_rules, ContentType};
 use crate::model::backend::{ChatMessage, StreamChunk};
 use crate::model::state as model_state;
 use crate::storage::action_history::insert_action_history;
+use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
 use tauri::Emitter;
@@ -19,6 +21,20 @@ static REGISTRY: LazyLock<Mutex<ActionRegistry>> = LazyLock::new(|| {
     }
     Mutex::new(registry)
 });
+
+static ACTIVE_STREAMS: LazyLock<Mutex<HashMap<String, tokio::task::AbortHandle>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn register_active_stream(action_id: &str, handle: tokio::task::AbortHandle) {
+    let mut streams = ACTIVE_STREAMS.lock().unwrap();
+    if let Some(prev) = streams.insert(action_id.to_string(), handle) {
+        prev.abort();
+    }
+}
+
+fn clear_active_stream(action_id: &str) {
+    ACTIVE_STREAMS.lock().unwrap().remove(action_id);
+}
 
 /// 重新加载插件到全局 REGISTRY（供 plugin_cmds 调用）
 pub fn reload_registry_plugins() -> usize {
@@ -101,10 +117,21 @@ pub async fn execute_action(
 /// 流式操作事件 payload
 #[derive(serde::Serialize, Clone)]
 pub struct ActionStreamPayload {
-    pub event_type: String, // "start" | "thinking" | "delta" | "done" | "error"
+    pub event_type: String, // "start" | "thinking" | "delta" | "done" | "error" | "cancelled"
     pub action_id: String,
     pub content: String,
     pub result_type: String,
+}
+
+#[tauri::command]
+pub fn stop_action_stream(action_id: String) -> Result<(), String> {
+    let handle = ACTIVE_STREAMS.lock().unwrap().remove(&action_id);
+    if let Some(handle) = handle {
+        handle.abort();
+        Ok(())
+    } else {
+        Err(format!("操作 '{}' 当前未在执行", action_id))
+    }
 }
 
 /// 流式执行指定操作（通过事件推送增量结果）
@@ -177,16 +204,18 @@ pub async fn execute_action_stream(
 
     let input_text = input.content.clone();
 
-    // 执行流式操作
     let start = Instant::now();
-    let result = action.execute_stream(input, sender).await;
+    let worker = tokio::spawn(async move { action.execute_stream(input, sender).await });
+    register_active_stream(&action_id, worker.abort_handle());
+    let result = worker.await;
     let duration_ms = start.elapsed().as_millis() as i64;
+    clear_active_stream(&action_id);
 
     // 等待转发任务完成
     let _ = forward_task.await;
 
     match result {
-        Ok(output) => {
+        Ok(Ok(output)) => {
             let model = model_state::default_backend_name();
             let _ = insert_action_history(
                 None,
@@ -207,7 +236,7 @@ pub async fn execute_action_stream(
             );
             Ok(output)
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             let _ = app_handle.emit(
                 "action-stream",
                 ActionStreamPayload {
@@ -218,6 +247,31 @@ pub async fn execute_action_stream(
                 },
             );
             Err(e)
+        }
+        Err(e) if e.is_cancelled() => {
+            let _ = app_handle.emit(
+                "action-stream",
+                ActionStreamPayload {
+                    event_type: "cancelled".to_string(),
+                    action_id,
+                    content: String::new(),
+                    result_type: String::new(),
+                },
+            );
+            Err("操作已取消".to_string())
+        }
+        Err(e) => {
+            let err = format!("流式任务异常结束: {}", e);
+            let _ = app_handle.emit(
+                "action-stream",
+                ActionStreamPayload {
+                    event_type: "error".to_string(),
+                    action_id,
+                    content: err.clone(),
+                    result_type: String::new(),
+                },
+            );
+            Err(err)
         }
     }
 }
@@ -299,6 +353,7 @@ pub async fn execute_quick_action(action_id: String) -> Result<QuickActionResult
 pub async fn execute_custom_stream(
     app_handle: tauri::AppHandle,
     content: String,
+    content_type: Option<ContentType>,
     prompt: String,
     thinking: Option<bool>,
 ) -> Result<ActionOutput, String> {
@@ -315,16 +370,7 @@ pub async fn execute_custom_stream(
         },
     );
 
-    let messages = vec![
-        ChatMessage {
-            role: "system".to_string(),
-            content: prompt,
-        },
-        ChatMessage {
-            role: "user".to_string(),
-            content,
-        },
-    ];
+    let content_type = content_type.unwrap_or(ContentType::PlainText);
 
     // 创建 channel 用于接收流式块
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<StreamChunk>();
@@ -361,20 +407,46 @@ pub async fn execute_custom_stream(
         }
     });
 
-    let input_text = messages
-        .last()
-        .map(|m| m.content.clone())
-        .unwrap_or_default();
-
     let start = Instant::now();
-    let result =
-        model_state::chat_stream_with_thinking(messages, None, Some(0.5), thinking, sender).await;
+    let input_text = content.clone();
+    let worker = tokio::spawn(async move {
+        if content_type == ContentType::Image {
+            let image_url = image_path_to_data_url(&content)?;
+            let messages = build_vision_messages(
+                "你是一个图片问答助手。基于图片内容回答用户问题；如果图片里看不清，就明确说明。",
+                &image_url,
+                &prompt,
+            );
+            match model_state::vision_chat(messages, Some(1024), Some(0.2)).await {
+                Ok(resp) => {
+                    let _ = sender.send(StreamChunk::Delta(resp.content.clone()));
+                    Ok(resp)
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            let messages = vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: prompt.clone(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: content.clone(),
+                },
+            ];
+            model_state::chat_stream_with_thinking(messages, None, Some(0.5), thinking, sender).await
+        }
+    });
+    register_active_stream(&action_id, worker.abort_handle());
+    let result = worker.await;
     let duration_ms = start.elapsed().as_millis() as i64;
+    clear_active_stream(&action_id);
 
     let _ = forward_task.await;
 
     match result {
-        Ok(resp) => {
+        Ok(Ok(resp)) => {
             let output = ActionOutput {
                 result: resp.content,
                 result_type: "text".to_string(),
@@ -399,7 +471,7 @@ pub async fn execute_custom_stream(
             );
             Ok(output)
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             let _ = app_handle.emit(
                 "action-stream",
                 ActionStreamPayload {
@@ -410,6 +482,31 @@ pub async fn execute_custom_stream(
                 },
             );
             Err(e)
+        }
+        Err(e) if e.is_cancelled() => {
+            let _ = app_handle.emit(
+                "action-stream",
+                ActionStreamPayload {
+                    event_type: "cancelled".to_string(),
+                    action_id,
+                    content: String::new(),
+                    result_type: String::new(),
+                },
+            );
+            Err("操作已取消".to_string())
+        }
+        Err(e) => {
+            let err = format!("流式任务异常结束: {}", e);
+            let _ = app_handle.emit(
+                "action-stream",
+                ActionStreamPayload {
+                    event_type: "error".to_string(),
+                    action_id,
+                    content: err.clone(),
+                    result_type: String::new(),
+                },
+            );
+            Err(err)
         }
     }
 }

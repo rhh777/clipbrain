@@ -15,6 +15,7 @@ import {
   executeAction,
   executeActionStream,
   executeCustomStream,
+  stopActionStream,
   listAllTags,
   getTags,
   addTag,
@@ -472,10 +473,11 @@ const MainLayout: Component<MainLayoutProps> = (props) => {
     })().catch(() => [] as string[]);
 
     const actionsPromise = (() => {
-      if (!item.content) {
+      const ct = parseContentType(item.content_type);
+      const actionInput = resolveActionInput(item);
+      if (!actionInput) {
         return Promise.resolve([] as ActionDescriptor[]);
       }
-      const ct = parseContentType(item.content_type);
       const key = `${locale()}::${item.content_type}`;
       const cached = selectionActionCache.get(key);
       if (cached) {
@@ -508,7 +510,7 @@ const MainLayout: Component<MainLayoutProps> = (props) => {
   // --- 操作执行 ---
   const handleAction = async (action: ActionDescriptor) => {
     const item = selectedItem();
-    if (!item?.content) return;
+    if (!item) return;
 
     setExecuting(action.id);
     setResult(null);
@@ -518,6 +520,12 @@ const MainLayout: Component<MainLayoutProps> = (props) => {
     setStreamThinking("");
 
     const ct = parseContentType(item.content_type);
+    const actionInput = resolveActionInput(item);
+    if (!actionInput) {
+      setError("No content available for this action");
+      setExecuting(null);
+      return;
+    }
 
     if (action.requires_model) {
       // 流式执行：立即展示结果框 + 流式更新
@@ -535,14 +543,29 @@ const MainLayout: Component<MainLayoutProps> = (props) => {
             case "delta":
               setStreamContent((prev) => prev + p.content);
               break;
+            case "done":
+            case "error":
+              setStreaming(false);
+              setExecuting(null);
+              break;
+            case "cancelled":
+              if (streamContent()) {
+                setResult({ result: streamContent(), result_type: "text" });
+              }
+              setStreaming(false);
+              setExecuting(null);
+              break;
           }
         });
 
         const thinkingVal = thinking() ? undefined : false;
-        const output = await executeActionStream(action.id, item.content, ct, thinkingVal);
+        const output = await executeActionStream(action.id, actionInput, ct, thinkingVal);
         setResult(output);
       } catch (e: any) {
-        setError(typeof e === "string" ? e : e?.message ?? t("detail.actionFailed"));
+        const message = typeof e === "string" ? e : e?.message ?? t("detail.actionFailed");
+        if (message !== "操作已取消") {
+          setError(message);
+        }
       } finally {
         unlistenStream?.();
         setStreaming(false);
@@ -552,7 +575,7 @@ const MainLayout: Component<MainLayoutProps> = (props) => {
       // 非模型操作：直接执行
       try {
         const thinkingVal = thinking() ? undefined : false;
-        const output = await executeAction(action.id, item.content, ct, thinkingVal);
+        const output = await executeAction(action.id, actionInput, ct, thinkingVal);
         setResult(output);
       } catch (e: any) {
         setError(typeof e === "string" ? e : e?.message ?? t("detail.actionFailed"));
@@ -565,7 +588,10 @@ const MainLayout: Component<MainLayoutProps> = (props) => {
   // --- 自定义操作 ---
   const handleCustomAction = async (prompt: string) => {
     const item = selectedItem();
-    if (!item?.content) return;
+    if (!item) return;
+    const contentType = parseContentType(item.content_type);
+    const actionInput = resolveActionInput(item);
+    if (!actionInput) return;
 
     setExecuting("custom_prompt");
     setResult(null);
@@ -587,14 +613,29 @@ const MainLayout: Component<MainLayoutProps> = (props) => {
           case "delta":
             setStreamContent((prev) => prev + p.content);
             break;
+          case "done":
+          case "error":
+            setStreaming(false);
+            setExecuting(null);
+            break;
+          case "cancelled":
+            if (streamContent()) {
+              setResult({ result: streamContent(), result_type: "text" });
+            }
+            setStreaming(false);
+            setExecuting(null);
+            break;
         }
       });
 
       const thinkingVal = thinking() ? undefined : false;
-      const output = await executeCustomStream(item.content, prompt, thinkingVal);
+      const output = await executeCustomStream(actionInput, contentType, prompt, thinkingVal);
       setResult(output);
     } catch (e: any) {
-      setError(typeof e === "string" ? e : e?.message ?? t("detail.actionFailed"));
+      const message = typeof e === "string" ? e : e?.message ?? t("detail.actionFailed");
+      if (message !== "操作已取消") {
+        setError(message);
+      }
     } finally {
       unlistenStream?.();
       setStreaming(false);
@@ -635,6 +676,19 @@ const MainLayout: Component<MainLayoutProps> = (props) => {
         console.error("Failed to confirm history selection:", e);
       }
     }
+  };
+
+  const handleStopStreaming = async () => {
+    const actionId = executing();
+    if (!actionId) return;
+    try {
+      await stopActionStream(actionId);
+    } catch {}
+    if (streamContent()) {
+      setResult({ result: streamContent(), result_type: "text" });
+    }
+    setStreaming(false);
+    setExecuting(null);
   };
 
   const handleTogglePin = async (id: number) => {
@@ -1329,6 +1383,7 @@ const MainLayout: Component<MainLayoutProps> = (props) => {
               onRemoveTag={handleRemoveTag}
               onToggleThinking={() => setThinking((v) => !v)}
               onCustomAction={handleCustomAction}
+              onStopStreaming={handleStopStreaming}
               clearInputToken={detailInputClearToken()}
             />
           </Show>
@@ -1356,11 +1411,19 @@ function parseContentType(ct: string): ContentType {
     PhoneNumber: { type: "PhoneNumber" },
     IdCard: { type: "IdCard" },
     MathExpression: { type: "MathExpression" },
+    Image: { type: "Image" },
     FileList: { type: "FileList" },
     PlainText: { type: "PlainText" },
     Unknown: { type: "Unknown" },
   };
   return simple[ct] ?? { type: "Unknown" };
+}
+
+function resolveActionInput(item: ClipboardHistoryItem): string | null {
+  if (item.content_type === "Image") {
+    return item.image_path;
+  }
+  return item.content;
 }
 
 function normalizeContentTypeKey(ct: string): string {

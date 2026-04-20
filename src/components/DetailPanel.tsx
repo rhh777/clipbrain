@@ -74,6 +74,7 @@ interface DetailPanelProps {
   onRemoveTag: (tagName: string) => void;
   onToggleThinking: () => void;
   onCustomAction: (prompt: string) => void;
+  onStopStreaming: () => void;
   clearInputToken: number;
 }
 
@@ -288,6 +289,10 @@ const DetailPanel: Component<DetailPanelProps> = (props) => {
   const groupedActions = createMemo(() => groupActions(props.actions));
 
   const handleCustomSubmit = () => {
+    if (props.executing === "custom_prompt") {
+      props.onStopStreaming();
+      return;
+    }
     const prompt = customPrompt().trim();
     if (!prompt) return;
     props.onCustomAction(prompt);
@@ -296,6 +301,10 @@ const DetailPanel: Component<DetailPanelProps> = (props) => {
 
   const handleQuickAction = (action: ActionDescriptor) => {
     quickActionsDetails?.removeAttribute("open");
+    if (props.executing === action.id) {
+      props.onStopStreaming();
+      return;
+    }
     props.onAction(action);
   };
 
@@ -303,19 +312,33 @@ const DetailPanel: Component<DetailPanelProps> = (props) => {
     <For each={actions}>
       {(action, index) => (
         <button
-          class="flex items-center justify-between w-full px-3 py-2.5 bg-[var(--cb-bg-card)] hover:bg-[var(--cb-bg-hover)] border border-[var(--cb-border)] rounded-xl transition-all text-left group disabled:opacity-40"
+          class={`flex items-center justify-between w-full px-3 py-2.5 border rounded-xl transition-all text-left group disabled:opacity-40 ${
+            props.executing === action.id
+              ? "bg-[var(--cb-red-bg)] border-[var(--cb-red-text)]/20"
+              : "bg-[var(--cb-bg-card)] hover:bg-[var(--cb-bg-hover)] border-[var(--cb-border)]"
+          }`}
           onClick={() => handleQuickAction(action)}
-          disabled={props.executing !== null}
+          disabled={props.executing !== null && props.executing !== action.id}
         >
           <div class="min-w-0">
-            <div class="text-[13px] font-medium text-[var(--cb-text-2)] group-hover:text-[var(--cb-text)] truncate">
+            <div class={`text-[13px] font-medium truncate ${
+              props.executing === action.id
+                ? "text-[var(--cb-red-text)]"
+                : "text-[var(--cb-text-2)] group-hover:text-[var(--cb-text)]"
+            }`}>
               {action.display_name}
             </div>
-            <div class="text-[11px] text-[var(--cb-text-3)] truncate">{action.description}</div>
+            <div class={`text-[11px] truncate ${
+              props.executing === action.id ? "text-[var(--cb-red-text)]/80" : "text-[var(--cb-text-3)]"
+            }`}>
+              {props.executing === action.id ? t("common.cancel") : action.description}
+            </div>
           </div>
           <div class="flex items-center gap-2 shrink-0 ml-2">
             <Show when={props.executing === action.id}>
-              <div class="w-3.5 h-3.5 border-2 border-[var(--cb-blue-text)] border-t-transparent rounded-full animate-spin" />
+              <svg class="w-3.5 h-3.5 text-[var(--cb-red-text)]" fill="currentColor" viewBox="0 0 24 24">
+                <rect x="7" y="7" width="10" height="10" rx="2" />
+              </svg>
             </Show>
             <span class="text-[11px] text-[var(--cb-text-4)] font-mono">⌘{startIndex + index() + 1}</span>
           </div>
@@ -566,7 +589,7 @@ const DetailPanel: Component<DetailPanelProps> = (props) => {
               </div>
 
                {/* 自定义操作 */}
-               <Show when={props.item?.content && props.item?.content_type !== "FileList"}>
+               <Show when={(props.item?.content || props.item?.image_path) && props.item?.content_type !== "FileList"}>
                  <div data-no-panel-drag class="shrink-0 flex items-end gap-2">
                    <div class="relative flex-1 min-w-0">
                      <input
@@ -582,8 +605,8 @@ const DetailPanel: Component<DetailPanelProps> = (props) => {
                        onInput={(e) => setCustomPrompt(e.currentTarget.value)}
                        onFocus={props.onFocusCustomAction}
                        on:keydown={(e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); e.stopPropagation(); handleCustomSubmit(); } }}
-                       disabled={props.executing !== null}
-                     />
+                        disabled={props.executing !== null && props.executing !== "custom_prompt"}
+                      />
                      <div class="absolute inset-y-0 right-2 flex items-center gap-1">
                        <Show when={props.actions.some((a) => a.requires_model)}>
                          <button
@@ -599,57 +622,98 @@ const DetailPanel: Component<DetailPanelProps> = (props) => {
                          </button>
                        </Show>
                        <button
-                         class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--cb-blue-bg)] text-[var(--cb-blue-text)] hover:opacity-80 transition-all disabled:opacity-40"
-                         onClick={handleCustomSubmit}
-                         disabled={props.executing !== null || !customPrompt().trim()}
-                         title={t("detail.customSend")}
-                       >
-                         <Show
-                           when={props.executing === "custom_prompt"}
-                           fallback={
-                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h12m0 0-5-5m5 5-5 5" />
-                             </svg>
-                           }
-                         >
-                           <div class="w-3.5 h-3.5 border-2 border-[var(--cb-blue-text)] border-t-transparent rounded-full animate-spin" />
-                         </Show>
-                       </button>
+                          class={`inline-flex h-8 w-8 items-center justify-center rounded-xl transition-all disabled:opacity-40 ${
+                            props.executing === "custom_prompt"
+                              ? "bg-[var(--cb-red-bg)] text-[var(--cb-red-text)]"
+                              : "bg-[var(--cb-blue-bg)] text-[var(--cb-blue-text)] hover:opacity-80"
+                          }`}
+                          onClick={handleCustomSubmit}
+                          disabled={(props.executing !== null && props.executing !== "custom_prompt") || (props.executing !== "custom_prompt" && !customPrompt().trim())}
+                          title={props.executing === "custom_prompt" ? t("common.cancel") : t("detail.customSend")}
+                        >
+                          <Show
+                            when={props.executing === "custom_prompt"}
+                            fallback={
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h12m0 0-5-5m5 5-5 5" />
+                              </svg>
+                            }
+                          >
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                              <rect x="7" y="7" width="10" height="10" rx="2" />
+                            </svg>
+                          </Show>
+                        </button>
                      </div>
                    </div>
-                    <Show when={props.actions.length > 0}>
-                      <details
-                        ref={quickActionsDetails}
-                        class="group relative shrink-0"
+                   <Show when={props.actions.length > 0}>
+                     <details
+                       ref={quickActionsDetails}
+                       class="group relative shrink-0"
                      >
                        <summary class="inline-flex h-[46px] items-center gap-1.5 rounded-2xl border border-[var(--cb-border)] bg-[var(--cb-bg-elevated)]/90 px-3 text-[12px] font-medium text-[var(--cb-text-2)] shadow-[0_18px_40px_rgba(15,23,42,0.08)] backdrop-blur-md transition-all cursor-pointer select-none list-none hover:border-[var(--cb-border-strong)] hover:bg-[var(--cb-bg-hover)] [&::-webkit-details-marker]:hidden">
                          {t("detail.moreActions")}
                          <svg class="w-3.5 h-3.5 transition-transform group-open:-rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 15l-7-7-7 7" />
                          </svg>
-                        </summary>
-                        <div class="absolute bottom-full right-0 z-20 mb-2 w-[280px] rounded-2xl border border-[var(--cb-border)] bg-[var(--cb-bg-elevated)]/95 p-2 shadow-[0_24px_60px_rgba(15,23,42,0.16)] backdrop-blur-xl">
-                          <div class="grid max-h-[240px] gap-2 overflow-y-auto pr-1">
-                            <Show when={groupedActions().specific.length > 0}>
-                              <section class="space-y-1.5">
-                                <div class="px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--cb-text-4)]">
-                                  {t("common.specificActions")}
-                                </div>
-                                {renderActionButtons(groupedActions().specific)}
-                              </section>
-                            </Show>
-                            <Show when={groupedActions().general.length > 0}>
-                              <section class="space-y-1.5">
-                                <div class="px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--cb-text-4)]">
-                                  {t("common.generalActions")}
-                                </div>
-                                {renderActionButtons(groupedActions().general, groupedActions().specific.length)}
-                              </section>
-                            </Show>
-                          </div>
-                        </div>
-                      </details>
-                    </Show>
+                       </summary>
+                       <div class="absolute bottom-full right-0 z-20 mb-2 w-[280px] rounded-2xl border border-[var(--cb-border)] bg-[var(--cb-bg-elevated)]/95 p-2 shadow-[0_24px_60px_rgba(15,23,42,0.16)] backdrop-blur-xl">
+                         <div class="grid max-h-[240px] gap-2 overflow-y-auto pr-1">
+                           <Show when={groupedActions().specific.length > 0}>
+                             <section class="space-y-1.5">
+                               <div class="px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--cb-text-4)]">
+                                 {t("common.specificActions")}
+                               </div>
+                               {renderActionButtons(groupedActions().specific)}
+                             </section>
+                           </Show>
+                           <Show when={groupedActions().general.length > 0}>
+                             <section class="space-y-1.5">
+                               <div class="px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--cb-text-4)]">
+                                 {t("common.generalActions")}
+                               </div>
+                               {renderActionButtons(groupedActions().general, groupedActions().specific.length)}
+                             </section>
+                           </Show>
+                         </div>
+                       </div>
+                     </details>
+                   </Show>
+                 </div>
+               </Show>
+               <Show when={!props.item?.content && !props.item?.image_path && props.actions.length > 0}>
+                 <div data-no-panel-drag class="shrink-0 flex justify-end">
+                   <details
+                     ref={quickActionsDetails}
+                     class="group relative"
+                   >
+                     <summary class="inline-flex h-[46px] items-center gap-1.5 rounded-2xl border border-[var(--cb-border)] bg-[var(--cb-bg-elevated)]/90 px-3 text-[12px] font-medium text-[var(--cb-text-2)] shadow-[0_18px_40px_rgba(15,23,42,0.08)] backdrop-blur-md transition-all cursor-pointer select-none list-none hover:border-[var(--cb-border-strong)] hover:bg-[var(--cb-bg-hover)] [&::-webkit-details-marker]:hidden">
+                       {t("detail.moreActions")}
+                       <svg class="w-3.5 h-3.5 transition-transform group-open:-rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 15l-7-7-7 7" />
+                       </svg>
+                     </summary>
+                     <div class="absolute bottom-full right-0 z-20 mb-2 w-[280px] rounded-2xl border border-[var(--cb-border)] bg-[var(--cb-bg-elevated)]/95 p-2 shadow-[0_24px_60px_rgba(15,23,42,0.16)] backdrop-blur-xl">
+                       <div class="grid max-h-[240px] gap-2 overflow-y-auto pr-1">
+                         <Show when={groupedActions().specific.length > 0}>
+                           <section class="space-y-1.5">
+                             <div class="px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--cb-text-4)]">
+                               {t("common.specificActions")}
+                             </div>
+                             {renderActionButtons(groupedActions().specific)}
+                           </section>
+                         </Show>
+                         <Show when={groupedActions().general.length > 0}>
+                           <section class="space-y-1.5">
+                             <div class="px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--cb-text-4)]">
+                               {t("common.generalActions")}
+                             </div>
+                             {renderActionButtons(groupedActions().general, groupedActions().specific.length)}
+                           </section>
+                         </Show>
+                       </div>
+                     </div>
+                   </details>
                  </div>
                </Show>
               </div>

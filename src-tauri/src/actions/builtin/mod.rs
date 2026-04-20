@@ -41,5 +41,4 @@ pub fn register_builtin_actions(registry: &mut ActionRegistry) {
     // 视觉操作（图片）
     registry.register(Arc::new(vision_actions::ImageOcrAction));
     registry.register(Arc::new(vision_actions::ImageDescribeAction));
-    registry.register(Arc::new(vision_actions::ImageTableExtractAction));
 }
