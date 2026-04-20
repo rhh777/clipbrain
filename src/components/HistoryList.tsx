@@ -64,6 +64,7 @@ interface HistoryListProps {
   selectedIndex: number;
   hasMore: boolean;
   expanded?: boolean;
+  showItemMeta?: boolean;
   currentClipContent?: string;
   onSelectItem: (item: ClipboardHistoryItem, index: number) => void;
   onTogglePin: (id: number) => void;
@@ -240,31 +241,45 @@ const HistoryList: Component<HistoryListProps> = (props) => {
                 return (
                   <div
                     data-index={index()}
-                    class={`group px-3 py-1 cursor-pointer transition-all border-l-2 h-12 flex items-center overflow-hidden ${
-                      isSelected()
-                        ? "bg-[var(--cb-selection-bg)] border-l-[var(--cb-blue-text)]"
-                        : "border-l-transparent hover:bg-[var(--cb-bg-hover)]"
-                    }`}
+                    class={`group px-2 py-1 cursor-pointer transition-colors`}
                     onClick={() => props.onSelectItem(item, index())}
                     onDblClick={() => props.onDoubleClick?.(item)}
-                    >
-                        <div class={`${itemMediaSlotClass} mr-2.5 flex items-center justify-center`}>
-                          <Show when={item.image_path} fallback={<AppIcon appName={item.source_app} />}>
-                            {(imagePath) => <ImageThumbnail imagePath={imagePath()} />}
-                          </Show>
-                        </div>
-
-                      <div class="flex-1 min-w-0 overflow-hidden">
-                        <p class={`text-[13px] font-mono leading-snug truncate ${isSelected() ? "text-[var(--cb-text)]" : "text-[var(--cb-text-2)]"}`}>
-                          {item.image_path ? (item.content?.trim() || t("contentType.Image")) : makePreview(item.content)}
-                        </p>
+                  >
+                    <div class={`flex items-center gap-2.5 px-2 py-1.5 rounded-lg transition-colors ${
+                      isSelected()
+                        ? "bg-[var(--cb-selection-bg)]"
+                        : "hover:bg-[var(--cb-bg-hover)]"
+                    }`}>
+                      {/* 图标区 */}
+                      <div class="shrink-0 drop-shadow-sm">
+                        <Show when={item.image_path} fallback={<AppIcon appName={item.source_app} />}>
+                          {(imagePath) => <ImageThumbnail imagePath={imagePath()} />}
+                        </Show>
                       </div>
 
-                    <div class="flex flex-col items-end gap-1 shrink-0 ml-2">
-                      <span class={`px-1.5 py-0 rounded text-[10px] font-medium whitespace-nowrap ${typeColor(item.content_type)}`}>
-                        {typeLabel(item.content_type)}
-                      </span>
-                      <div class="flex items-center gap-1">
+                      {/* 内容区：主文本 + 来源&时间 */}
+                      <div class="flex-1 min-w-0 overflow-hidden">
+                        <p class={`text-[13px] leading-snug truncate ${isSelected() ? "text-[var(--cb-text)]" : "text-[var(--cb-text-2)]"}`}>
+                          {item.image_path ? (item.content?.trim() || t("contentType.Image")) : makePreview(item.content)}
+                        </p>
+                        <Show when={props.showItemMeta !== false}>
+                          <p class="text-[11px] text-[var(--cb-text-4)] truncate mt-0.5">
+                            {item.source_app ?? ""}
+                            <Show when={item.source_app && item.created_at}>
+                              <span class="mx-1 opacity-50">·</span>
+                            </Show>
+                            <Show when={item.created_at}>
+                              {formatTime(item.created_at!)}
+                            </Show>
+                          </p>
+                        </Show>
+                      </div>
+
+                      {/* 右侧：类型标签 + 收藏按钮 */}
+                      <div class="flex flex-col items-end gap-1 shrink-0">
+                        <span class={`px-1.5 py-0 rounded text-[10px] font-medium whitespace-nowrap ${typeColor(item.content_type)}`}>
+                          {typeLabel(item.content_type)}
+                        </span>
                         <button
                           class={`transition-all shrink-0 ${
                             item.is_pinned

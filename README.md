@@ -4,6 +4,13 @@
 
 ClipBrain 会在后台监听剪贴板，自动识别内容类型（URL / 代码 / JSON / 表格 / 图片等），并提供对应的 AI 操作：翻译、摘要、格式化、解释、OCR、敏感信息脱敏等。所有历史数据本地 SQLite 存储，API Key 通过系统 Keychain 管理，隐私可控。
 
+<p align="center">
+  <img src="docs/clip_history.png" alt="剪贴板历史面板" width="720" />
+</p>
+<p align="center">
+  <img src="docs/clip_history_image.png" alt="图片历史与详情" width="720" />
+</p>
+
 ## 特性
 
 - **剪贴板历史**：自动捕获文本 / 图片 / 文件，支持标签、搜索、时间范围过滤

@@ -148,6 +148,7 @@ const SettingsPage: Component<SettingsPageProps> = (props) => {
   const [showDetailPanelByDefault, setShowDetailPanelByDefault] = createSignal(true);
   const [showSearchToolbarButtons, setShowSearchToolbarButtons] = createSignal(false);
   const [clearInputsOnPanelOpen, setClearInputsOnPanelOpen] = createSignal(false);
+  const [showItemMeta, setShowItemMeta] = createSignal(true);
 
   // --- 快捷操作状态 ---
   const [quickActions, setQuickActions] = createSignal<QuickActionBinding[]>([]);
@@ -259,6 +260,7 @@ const SettingsPage: Component<SettingsPageProps> = (props) => {
       setAutoStart(cfg.general.auto_start ?? false);
       setShowDetailPanelByDefault(cfg.general.show_detail_panel_by_default ?? true);
       setShowSearchToolbarButtons(cfg.general.show_search_toolbar_buttons ?? false);
+      setShowItemMeta(cfg.general.show_item_meta ?? true);
       setClearInputsOnPanelOpen(cfg.general.clear_inputs_on_panel_open ?? false);
       setAppConfig(cfg);
     } catch {}
@@ -559,6 +561,18 @@ const SettingsPage: Component<SettingsPageProps> = (props) => {
       await saveAppConfig(nextConfig);
     } catch {
       setShowSearchToolbarButtons(cfg.general.show_search_toolbar_buttons ?? false);
+    }
+  };
+
+  const handleToggleShowItemMeta = async (enabled: boolean) => {
+    const cfg = appConfig();
+    if (!cfg) return;
+    setShowItemMeta(enabled);
+    const nextConfig = { ...cfg, general: { ...cfg.general, show_item_meta: enabled } };
+    try {
+      await saveAppConfig(nextConfig);
+    } catch {
+      setShowItemMeta(cfg.general.show_item_meta ?? true);
     }
   };
 
@@ -880,6 +894,31 @@ const SettingsPage: Component<SettingsPageProps> = (props) => {
                     <span
                       class={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
                         showDetailPanelByDefault() ? "translate-x-5" : "translate-x-0.5"
+                      }`}
+                    />
+                  </span>
+                </button>
+                <button
+                  class={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl border transition-all ${
+                    showItemMeta()
+                      ? "bg-[var(--cb-blue-bg)] border-[var(--cb-blue-text)]/30"
+                      : "bg-[var(--cb-bg-card)] border-[var(--cb-border)] hover:bg-[var(--cb-bg-hover)]"
+                  }`}
+                  onClick={() => void handleToggleShowItemMeta(!showItemMeta())}
+                >
+                  <div class="text-left">
+                    <div class="text-[13px] font-medium text-[var(--cb-text-2)]">{t("settings.showItemMeta")}</div>
+                    <p class="text-[11px] text-[var(--cb-text-4)] mt-0.5">{t("settings.showItemMetaDesc")}</p>
+                  </div>
+                  <span
+                    class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      showItemMeta() ? "bg-[var(--cb-blue-text)]" : "bg-[var(--cb-border-strong)]"
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <span
+                      class={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                        showItemMeta() ? "translate-x-5" : "translate-x-0.5"
                       }`}
                     />
                   </span>

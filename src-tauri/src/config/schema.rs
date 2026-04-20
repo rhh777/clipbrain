@@ -24,6 +24,8 @@ pub struct GeneralConfig {
     pub show_search_toolbar_buttons: bool,
     #[serde(default)]
     pub clear_inputs_on_panel_open: bool,
+    #[serde(default = "default_true")]
+    pub show_item_meta: bool,
 }
 
 fn default_history_limit() -> u32 {
@@ -152,6 +154,7 @@ impl Default for AppConfig {
                 show_detail_panel_by_default: true,
                 show_search_toolbar_buttons: false,
                 clear_inputs_on_panel_open: false,
+                show_item_meta: true,
             },
             popup: PopupConfig {
                 position: "top_right".to_string(),

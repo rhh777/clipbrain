@@ -87,6 +87,7 @@ const MainLayout: Component<MainLayoutProps> = (props) => {
   const [showSearchToolbarButtons, setShowSearchToolbarButtons] = createSignal(false);
   const [showDetailPanelByDefault, setShowDetailPanelByDefault] = createSignal(true);
   const [clearInputsOnPanelOpen, setClearInputsOnPanelOpen] = createSignal(false);
+  const [showItemMeta, setShowItemMeta] = createSignal(true);
   const [detailInputClearToken, setDetailInputClearToken] = createSignal(0);
   const PAGE_SIZE = 50;
 
@@ -832,6 +833,7 @@ const MainLayout: Component<MainLayoutProps> = (props) => {
       setShowDetailPanelByDefault(cfg.general.show_detail_panel_by_default ?? true);
       setShowSearchToolbarButtons(cfg.general.show_search_toolbar_buttons ?? false);
       setClearInputsOnPanelOpen(cfg.general.clear_inputs_on_panel_open ?? false);
+      setShowItemMeta(cfg.general.show_item_meta ?? true);
     } catch {}
 
     refreshTags();
@@ -1288,6 +1290,7 @@ const MainLayout: Component<MainLayoutProps> = (props) => {
             selectedIndex={selectedIndex()}
             hasMore={hasMore()}
             expanded={!showDetailPanelByDefault()}
+            showItemMeta={showItemMeta()}
             currentClipContent={currentClip()?.content}
             onSelectItem={(item: ClipboardHistoryItem, index: number) => {
               setSelectedIndex(index);

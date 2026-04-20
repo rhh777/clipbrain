@@ -211,6 +211,8 @@
     "panelLayout": "面板布局",
     "showDetailPanelByDefault": "唤起时默认展示右侧详情",
     "showDetailPanelByDefaultDesc": "关闭后默认隐藏右侧详情区，只保留顶部和左侧历史列表；面板打开时可随时按 Shift + Tab 展开或收起右侧详情",
+    "showItemMeta": "列表条目显示来源与时间",
+    "showItemMetaDesc": "开启后每条记录下方显示来源应用名称和复制时间",
     "clearInputsOnPanelOpen": "每次打开面板时清空输入框",
     "clearInputsOnPanelOpenDesc": "开启后会在面板显示时清空顶部搜索框和右侧详情输入框",
     "searchToolbar": "搜索栏快捷入口",

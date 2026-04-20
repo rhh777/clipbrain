@@ -211,6 +211,8 @@
     "panelLayout": "Panel Layout",
     "showDetailPanelByDefault": "Show the detail pane by default when the panel opens",
     "showDetailPanelByDefaultDesc": "Turn this off to hide the right-side detail pane by default and keep only the top bar plus the history list. While the panel is open, press Shift + Tab at any time to toggle the right-side detail pane.",
+    "showItemMeta": "Show source app and time in list items",
+    "showItemMetaDesc": "When enabled, each item shows the source app name and copy time below the content",
     "clearInputsOnPanelOpen": "Clear input boxes each time the panel opens",
     "clearInputsOnPanelOpenDesc": "When enabled, the top search box and the right-side detail input will be cleared whenever the panel is shown.",
     "searchToolbar": "Search Bar Shortcuts",

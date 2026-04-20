@@ -311,6 +311,7 @@ export interface AppConfig {
     show_detail_panel_by_default: boolean;
     show_search_toolbar_buttons: boolean;
     clear_inputs_on_panel_open: boolean;
+    show_item_meta: boolean;
   };
   hotkey: { open_panel: string; quick_translate: string; quick_summarize: string; quick_actions: QuickActionBinding[] };
   popup: { position: string; auto_dismiss_ms: number; max_width: number };
