@@ -1,6 +1,9 @@
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex, OnceLock,
+    },
 };
 use tauri::{
     menu::{Menu, MenuItem},
@@ -21,6 +24,8 @@ mod macos_panel;
 mod model;
 mod storage;
 mod utils;
+
+static ALLOW_APP_EXIT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy)]
 pub(crate) enum MainWindowShowMode {
@@ -203,6 +208,16 @@ fn hide_main_window(app_handle: &tauri::AppHandle) {
     }
 }
 
+fn show_main_window_after_startup(app_handle: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        let window_app_handle = app_handle.clone();
+        let _ = app_handle.run_on_main_thread(move || {
+            show_main_window(&window_app_handle, MainWindowShowMode::Focused);
+        });
+    });
+}
+
 fn run_hotkey_action(action: &str, callback: impl FnOnce()) {
     if let Err(payload) = catch_unwind(AssertUnwindSafe(callback)) {
         let reason = if let Some(message) = payload.downcast_ref::<&str>() {
@@ -316,13 +331,13 @@ pub fn run() {
             let autostart = app.autolaunch();
             let current_enabled = autostart.is_enabled().unwrap_or(false);
             if config.general.auto_start && !current_enabled {
-                autostart
-                    .enable()
-                    .map_err(|e| format!("启用开机自启动失败: {}", e))?;
+                if let Err(e) = autostart.enable() {
+                    log::error!("启用开机自启动失败: {}", e);
+                }
             } else if !config.general.auto_start && current_enabled {
-                autostart
-                    .disable()
-                    .map_err(|e| format!("关闭开机自启动失败: {}", e))?;
+                if let Err(e) = autostart.disable() {
+                    log::error!("关闭开机自启动失败: {}", e);
+                }
             }
 
             // 创建托盘菜单
@@ -354,6 +369,7 @@ pub fn run() {
                         }
                     }
                     "quit" => {
+                        ALLOW_APP_EXIT.store(true, Ordering::SeqCst);
                         app.exit(0);
                     }
                     _ => {}
@@ -466,7 +482,7 @@ pub fn run() {
 
             // 首次安装时直接展示窗口，避免 panel 初始化后保持隐藏，必须手动点 Dock 图标才出现。
             if commands::config_cmds::is_first_launch() {
-                show_main_window(app.handle(), MainWindowShowMode::Focused);
+                show_main_window_after_startup(app.handle().clone());
             }
 
             // 启动剪贴板后台监听（轮询间隔 500ms，去重节流 300ms）
@@ -554,6 +570,13 @@ pub fn run() {
             }
             RunEvent::Reopen { .. } => {
                 show_main_window(app_handle, MainWindowShowMode::Focused);
+            }
+            RunEvent::ExitRequested { api, .. } => {
+                if !ALLOW_APP_EXIT.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                    hide_main_window(app_handle);
+                    log::warn!("已拦截非显式退出请求，ClipBrain 将继续在后台运行");
+                }
             }
             _ => {}
         });
