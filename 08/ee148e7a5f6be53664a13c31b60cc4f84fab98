@@ -1,0 +1,25 @@
+README.md
+  s_43cd2eb6c79551::t_c16c1652ea94a0 58-63
+scripts/build-macos-local.mjs
+  s_43cd2eb6c79551::t_c16c1652ea94a0 1-43
+package.json
+  s_43cd2eb6c79551::t_c16c1652ea94a0 16
+README_ZH.md
+  s_43cd2eb6c79551::t_c16c1652ea94a0 58-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.6",
+  "base_commit_sha": "08ee148e7a5f6be53664a13c31b60cc4f84fab98",
+  "prompts": {},
+  "sessions": {
+    "s_43cd2eb6c79551": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d239-a42d-7f02-9f05-fc48f7cf34cf",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "haorenhui <haorenhui@kingsoft.com>"
+    }
+  }
+}
