@@ -55,6 +55,11 @@ npm run tauri dev
 npm run tauri build
 ```
 
+本机反复安装时，建议先在钥匙串中配置代码签名证书，然后使用
+`npm run build:mac:local`。该命令会选用本机唯一的有效签名身份并生成 `.app`；
+如果有多个证书，可通过 `APPLE_SIGNING_IDENTITY=<证书 SHA-1> npm run build:mac:local`
+指定。普通构建使用临时签名，每次更新后 macOS 可能重新请求钥匙串授权。
+
 首次启动会进入引导页，配置好模型 API Key 后即可使用。API Key 存储于系统 Keychain，不会写入任何文件。
 
 ## 项目结构

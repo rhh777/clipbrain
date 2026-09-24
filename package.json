@@ -13,6 +13,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:mac:local": "node scripts/build-macos-local.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

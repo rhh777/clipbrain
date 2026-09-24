@@ -55,6 +55,12 @@ npm run tauri dev
 npm run tauri build
 ```
 
+For repeated local installs, configure a code signing certificate in Keychain and run
+`npm run build:mac:local`. This command selects the only valid local signing identity
+and builds the `.app`. If you have multiple identities, select one with
+`APPLE_SIGNING_IDENTITY=<certificate SHA-1> npm run build:mac:local`.
+Ad-hoc signed builds may trigger a new Keychain access prompt after each update.
+
 On first launch, the app opens the onboarding flow. After configuring a model API key, ClipBrain is ready to use. API keys are stored in the system Keychain and are never written to project files.
 
 ## Project Structure
