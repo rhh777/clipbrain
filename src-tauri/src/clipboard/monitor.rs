@@ -1,6 +1,7 @@
 use chrono::Local;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -243,53 +244,117 @@ impl ClipboardMonitor {
         let interval = self.poll_interval_ms;
 
         std::thread::spawn(move || {
-            println!(
-                "[ClipBrain] 剪贴板监听已启动 (间隔 {}ms, 去重 {}ms)",
-                interval, self.debounce_ms
-            );
-
-            // 先测试剪贴板是否可访问
-            match arboard::Clipboard::new() {
-                Ok(mut cb) => match cb.get_text() {
-                    Ok(t) => println!("[ClipBrain] 剪贴板可访问，当前内容长度: {}", t.len()),
-                    Err(e) => println!("[ClipBrain] 剪贴板读取失败: {}", e),
-                },
-                Err(e) => println!("[ClipBrain] 剪贴板初始化失败: {}", e),
-            }
-
             loop {
-                std::thread::sleep(Duration::from_millis(interval));
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    println!(
+                        "[ClipBrain] 剪贴板监听已启动 (间隔 {}ms, 去重 {}ms)",
+                        interval, self.debounce_ms
+                    );
 
-                // 隐私检查：排除应用
-                if privacy::should_skip_clipboard() {
-                    continue;
-                }
+                    // 先测试剪贴板是否可访问
+                    match arboard::Clipboard::new() {
+                        Ok(mut cb) => match cb.get_text() {
+                            Ok(t) => {
+                                println!("[ClipBrain] 剪贴板可访问，当前内容长度: {}", t.len())
+                            }
+                            Err(e) => println!("[ClipBrain] 剪贴板读取失败: {}", e),
+                        },
+                        Err(e) => println!("[ClipBrain] 剪贴板初始化失败: {}", e),
+                    }
 
-                // 检测图片变化
-                if let Some((width, height, rgba, image_hash)) = self.poll_image() {
-                    println!("[ClipBrain] 检测到剪贴板图片: {}x{}", width, height);
+                    loop {
+                        std::thread::sleep(Duration::from_millis(interval));
 
-                    // 保存为 PNG
-                    match save_image_to_file(width, height, &rgba, &image_hash) {
-                        Ok(image_path) => {
+                        // 隐私检查：排除应用
+                        if privacy::should_skip_clipboard() {
+                            continue;
+                        }
+
+                        // 检测图片变化
+                        if let Some((width, height, rgba, image_hash)) = self.poll_image() {
+                            println!("[ClipBrain] 检测到剪贴板图片: {}x{}", width, height);
+
+                            // 保存为 PNG
+                            match save_image_to_file(width, height, &rgba, &image_hash) {
+                                Ok(image_path) => {
+                                    let source_app = get_frontmost_app_cached();
+                                    let content_type_str = format!("{:?}", ContentType::Image);
+
+                                    let item = match clipboard_history::insert_history(
+                                        None,
+                                        Some(&image_path),
+                                        Some(&image_hash),
+                                        &content_type_str,
+                                        source_app.as_deref(),
+                                        None,
+                                        false,
+                                    ) {
+                                        Ok(id) => {
+                                            println!("[ClipBrain] 图片历史记录已写入, id={}", id);
+                                            Some(build_history_item(
+                                                id,
+                                                None,
+                                                Some(image_path.clone()),
+                                                content_type_str.clone(),
+                                                source_app.clone(),
+                                                None,
+                                                false,
+                                            ))
+                                        }
+                                        Err(e) => {
+                                            println!("[ClipBrain] 图片历史记录写入失败: {}", e);
+                                            None
+                                        }
+                                    };
+
+                                    let timestamp = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_millis()
+                                        as u64;
+
+                                    let event = ClipboardChangeEvent {
+                                        content: image_path.clone(),
+                                        content_type: ContentType::Image,
+                                        preview: format!("[Image {}x{}]", width, height),
+                                        actions: list_actions_for_type(
+                                            &ContentType::Image,
+                                            "zh-CN",
+                                        ),
+                                        timestamp,
+                                        item,
+                                    };
+
+                                    let _ = app_handle.emit("clipboard-change", &event);
+                                }
+                                Err(e) => println!("[ClipBrain] 保存剪贴板图片失败: {}", e),
+                            }
+                            continue;
+                        }
+
+                        if let Some(paths) = self.poll_file_list() {
+                            println!("[ClipBrain] 检测到剪贴板文件: {} 个", paths.len());
+
+                            let content = paths.join("\n");
+                            let content_type = ContentType::FileList;
+                            let content_type_str = format!("{:?}", content_type);
                             let source_app = get_frontmost_app_cached();
-                            let content_type_str = format!("{:?}", ContentType::Image);
 
                             let item = match clipboard_history::insert_history(
+                                Some(&content),
                                 None,
-                                Some(&image_path),
-                                Some(&image_hash),
+                                None,
                                 &content_type_str,
                                 source_app.as_deref(),
                                 None,
                                 false,
                             ) {
                                 Ok(id) => {
-                                    println!("[ClipBrain] 图片历史记录已写入, id={}", id);
+                                    println!("[ClipBrain] 文件历史记录已写入, id={}", id);
                                     Some(build_history_item(
                                         id,
+                                        Some(content.clone()),
                                         None,
-                                        Some(image_path.clone()),
                                         content_type_str.clone(),
                                         source_app.clone(),
                                         None,
@@ -297,7 +362,7 @@ impl ClipboardMonitor {
                                     ))
                                 }
                                 Err(e) => {
-                                    println!("[ClipBrain] 图片历史记录写入失败: {}", e);
+                                    println!("[ClipBrain] 文件历史记录写入失败: {}", e);
                                     None
                                 }
                             };
@@ -308,163 +373,130 @@ impl ClipboardMonitor {
                                 .as_millis() as u64;
 
                             let event = ClipboardChangeEvent {
-                                content: image_path.clone(),
-                                content_type: ContentType::Image,
-                                preview: format!("[Image {}x{}]", width, height),
-                                actions: list_actions_for_type(&ContentType::Image, "zh-CN"),
+                                content: content.clone(),
+                                content_type,
+                                preview: make_file_list_preview(&paths),
+                                actions: list_actions_for_type(&ContentType::FileList, "zh-CN"),
                                 timestamp,
                                 item,
                             };
 
-                            let _ = app_handle.emit("clipboard-change", &event);
+                            match app_handle.emit("clipboard-change", &event) {
+                                Ok(_) => println!("[ClipBrain] 文件事件已推送到前端"),
+                                Err(e) => println!("[ClipBrain] 推送文件事件失败: {}", e),
+                            }
+
+                            let config = config_manager::get();
+                            let mode = config.general.trigger_mode.as_str();
+                            if mode == "auto_popup" || mode == "both" {
+                                crate::show_main_window(
+                                    &app_handle,
+                                    crate::MainWindowShowMode::Overlay,
+                                );
+                            }
+                            continue;
                         }
-                        Err(e) => println!("[ClipBrain] 保存剪贴板图片失败: {}", e),
-                    }
-                    continue;
-                }
 
-                if let Some(paths) = self.poll_file_list() {
-                    println!("[ClipBrain] 检测到剪贴板文件: {} 个", paths.len());
-
-                    let content = paths.join("\n");
-                    let content_type = ContentType::FileList;
-                    let content_type_str = format!("{:?}", content_type);
-                    let source_app = get_frontmost_app_cached();
-
-                    let item = match clipboard_history::insert_history(
-                        Some(&content),
-                        None,
-                        None,
-                        &content_type_str,
-                        source_app.as_deref(),
-                        None,
-                        false,
-                    ) {
-                        Ok(id) => {
-                            println!("[ClipBrain] 文件历史记录已写入, id={}", id);
-                            Some(build_history_item(
-                                id,
-                                Some(content.clone()),
-                                None,
-                                content_type_str.clone(),
-                                source_app.clone(),
-                                None,
-                                false,
-                            ))
+                        // Finder 等应用会同时放入文件列表和文件名文本；有文件列表时优先只记录文件项。
+                        if self.has_file_list() {
+                            continue;
                         }
-                        Err(e) => {
-                            println!("[ClipBrain] 文件历史记录写入失败: {}", e);
-                            None
-                        }
-                    };
 
-                    let timestamp = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
+                        if let Some(text) = self.poll_text() {
+                            println!("[ClipBrain] 检测到剪贴板变化: {} 字符", text.len());
 
-                    let event = ClipboardChangeEvent {
-                        content: content.clone(),
-                        content_type,
-                        preview: make_file_list_preview(&paths),
-                        actions: list_actions_for_type(&ContentType::FileList, "zh-CN"),
-                        timestamp,
-                        item,
-                    };
+                            let content_type = classify_by_rules(&text);
+                            println!("[ClipBrain] 分类结果: {:?}", content_type);
 
-                    match app_handle.emit("clipboard-change", &event) {
-                        Ok(_) => println!("[ClipBrain] 文件事件已推送到前端"),
-                        Err(e) => println!("[ClipBrain] 推送文件事件失败: {}", e),
-                    }
+                            let actions = list_actions_for_type(&content_type, "zh-CN");
+                            println!("[ClipBrain] 可用操作: {} 个", actions.len());
 
-                    let config = config_manager::get();
-                    let mode = config.general.trigger_mode.as_str();
-                    if mode == "auto_popup" || mode == "both" {
-                        crate::show_main_window(&app_handle, crate::MainWindowShowMode::Overlay);
-                    }
-                    continue;
-                }
+                            let preview = make_preview(&text, 200);
 
-                // Finder 等应用会同时放入文件列表和文件名文本；有文件列表时优先只记录文件项。
-                if self.has_file_list() {
-                    continue;
-                }
+                            let timestamp = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
 
-                if let Some(text) = self.poll_text() {
-                    println!("[ClipBrain] 检测到剪贴板变化: {} 字符", text.len());
-
-                    let content_type = classify_by_rules(&text);
-                    println!("[ClipBrain] 分类结果: {:?}", content_type);
-
-                    let actions = list_actions_for_type(&content_type, "zh-CN");
-                    println!("[ClipBrain] 可用操作: {} 个", actions.len());
-
-                    let preview = make_preview(&text, 200);
-
-                    let timestamp = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
-
-                    // 写入历史记录
-                    let content_type_str = format!("{:?}", content_type);
-                    let is_sensitive = matches!(
-                        content_type,
-                        ContentType::PhoneNumber | ContentType::IdCard | ContentType::Email
-                    );
-                    let char_count = text.len() as i64;
-                    let source_app = get_frontmost_app_cached();
-                    if let Some(ref app) = source_app {
-                        println!("[ClipBrain] 来源应用: {}", app);
-                    }
-                    let item = match clipboard_history::insert_history(
-                        Some(&text),
-                        None,
-                        None,
-                        &content_type_str,
-                        source_app.as_deref(),
-                        Some(char_count),
-                        is_sensitive,
-                    ) {
-                        Ok(id) => {
-                            println!("[ClipBrain] 历史记录已写入, id={}", id);
-                            Some(build_history_item(
-                                id,
-                                Some(text.clone()),
+                            // 写入历史记录
+                            let content_type_str = format!("{:?}", content_type);
+                            let is_sensitive = matches!(
+                                content_type,
+                                ContentType::PhoneNumber | ContentType::IdCard | ContentType::Email
+                            );
+                            let char_count = text.len() as i64;
+                            let source_app = get_frontmost_app_cached();
+                            if let Some(ref app) = source_app {
+                                println!("[ClipBrain] 来源应用: {}", app);
+                            }
+                            let item = match clipboard_history::insert_history(
+                                Some(&text),
                                 None,
-                                content_type_str.clone(),
-                                source_app.clone(),
+                                None,
+                                &content_type_str,
+                                source_app.as_deref(),
                                 Some(char_count),
                                 is_sensitive,
-                            ))
+                            ) {
+                                Ok(id) => {
+                                    println!("[ClipBrain] 历史记录已写入, id={}", id);
+                                    Some(build_history_item(
+                                        id,
+                                        Some(text.clone()),
+                                        None,
+                                        content_type_str.clone(),
+                                        source_app.clone(),
+                                        Some(char_count),
+                                        is_sensitive,
+                                    ))
+                                }
+                                Err(e) => {
+                                    println!("[ClipBrain] 历史记录写入失败: {}", e);
+                                    None
+                                }
+                            };
+
+                            let event = ClipboardChangeEvent {
+                                content: text,
+                                content_type,
+                                preview,
+                                actions,
+                                timestamp,
+                                item,
+                            };
+
+                            match app_handle.emit("clipboard-change", &event) {
+                                Ok(_) => println!("[ClipBrain] 事件已推送到前端"),
+                                Err(e) => println!("[ClipBrain] 推送事件失败: {}", e),
+                            }
+
+                            // 根据 trigger_mode 自动显示窗口
+                            let config = config_manager::get();
+                            let mode = config.general.trigger_mode.as_str();
+                            if mode == "auto_popup" || mode == "both" {
+                                crate::show_main_window(
+                                    &app_handle,
+                                    crate::MainWindowShowMode::Overlay,
+                                );
+                            }
                         }
-                        Err(e) => {
-                            println!("[ClipBrain] 历史记录写入失败: {}", e);
-                            None
+                    }
+                }));
+
+                let reason = match result {
+                    Ok(()) => "监听循环意外结束".to_string(),
+                    Err(payload) => {
+                        if let Some(message) = payload.downcast_ref::<&str>() {
+                            (*message).to_string()
+                        } else if let Some(message) = payload.downcast_ref::<String>() {
+                            message.clone()
+                        } else {
+                            "unknown panic payload".to_string()
                         }
-                    };
-
-                    let event = ClipboardChangeEvent {
-                        content: text,
-                        content_type,
-                        preview,
-                        actions,
-                        timestamp,
-                        item,
-                    };
-
-                    match app_handle.emit("clipboard-change", &event) {
-                        Ok(_) => println!("[ClipBrain] 事件已推送到前端"),
-                        Err(e) => println!("[ClipBrain] 推送事件失败: {}", e),
                     }
-
-                    // 根据 trigger_mode 自动显示窗口
-                    let config = config_manager::get();
-                    let mode = config.general.trigger_mode.as_str();
-                    if mode == "auto_popup" || mode == "both" {
-                        crate::show_main_window(&app_handle, crate::MainWindowShowMode::Overlay);
-                    }
-                }
+                };
+                log::error!("剪贴板监听线程异常退出: {}，2 秒后重启", reason);
+                std::thread::sleep(Duration::from_secs(2));
             }
         });
     }

@@ -20,6 +20,8 @@ mod commands;
 mod config;
 mod errors;
 #[cfg(target_os = "macos")]
+mod macos_lifecycle;
+#[cfg(target_os = "macos")]
 mod macos_panel;
 mod model;
 mod storage;
@@ -37,6 +39,15 @@ pub(crate) enum MainWindowShowMode {
 fn previous_overlay_app_pid() -> &'static Mutex<Option<i32>> {
     static PREVIOUS_APP_PID: OnceLock<Mutex<Option<i32>>> = OnceLock::new();
     PREVIOUS_APP_PID.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(target_os = "macos")]
+fn is_main_thread() -> bool {
+    #[allow(deprecated, unexpected_cfgs)]
+    unsafe {
+        use objc::{class, msg_send, sel, sel_impl};
+        msg_send![class!(NSThread), isMainThread]
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -104,6 +115,15 @@ pub(crate) fn reactivate_previous_overlay_app() -> Result<bool, String> {
 }
 
 pub(crate) fn show_main_window(app_handle: &tauri::AppHandle, mode: MainWindowShowMode) {
+    #[cfg(target_os = "macos")]
+    if !is_main_thread() {
+        let app = app_handle.clone();
+        if let Err(e) = app_handle.run_on_main_thread(move || show_main_window(&app, mode)) {
+            log::error!("切换到主线程显示窗口失败: {}", e);
+        }
+        return;
+    }
+
     #[cfg(target_os = "macos")]
     if matches!(mode, MainWindowShowMode::Overlay) {
         remember_overlay_target_app();
@@ -198,6 +218,15 @@ fn main_window_is_visible(app_handle: &tauri::AppHandle) -> bool {
 
 fn hide_main_window(app_handle: &tauri::AppHandle) {
     #[cfg(target_os = "macos")]
+    if !is_main_thread() {
+        let app = app_handle.clone();
+        if let Err(e) = app_handle.run_on_main_thread(move || hide_main_window(&app)) {
+            log::error!("切换到主线程隐藏窗口失败: {}", e);
+        }
+        return;
+    }
+
+    #[cfg(target_os = "macos")]
     if macos_panel::is_initialized() {
         let _ = macos_panel::hide_panel();
         return;
@@ -205,6 +234,25 @@ fn hide_main_window(app_handle: &tauri::AppHandle) {
 
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.hide();
+    }
+}
+
+fn toggle_main_window(app_handle: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    if !is_main_thread() {
+        let app = app_handle.clone();
+        if let Err(e) = app_handle.run_on_main_thread(move || {
+            run_hotkey_action("toggle_panel", || toggle_main_window(&app));
+        }) {
+            log::error!("切换到主线程切换窗口失败: {}", e);
+        }
+        return;
+    }
+
+    if main_window_is_visible(app_handle) {
+        hide_main_window(app_handle);
+    } else {
+        show_main_window(app_handle, MainWindowShowMode::Overlay);
     }
 }
 
@@ -281,11 +329,7 @@ fn update_shortcut(
     gs.on_shortcut(new_sc, move |handle, _shortcut, event| {
         if event.state == ShortcutState::Pressed {
             run_hotkey_action("update_shortcut_toggle_panel", || {
-                if main_window_is_visible(handle) {
-                    hide_main_window(handle);
-                } else {
-                    show_main_window(handle, MainWindowShowMode::Overlay);
-                }
+                toggle_main_window(handle);
             });
         }
     })
@@ -325,6 +369,7 @@ pub fn run() {
                         NSApplicationActivationPolicy::NSApplicationActivationPolicyAccessory,
                     );
                 }
+                macos_lifecycle::prevent_background_termination();
             }
 
             let config = config::manager::get();
@@ -389,11 +434,7 @@ pub fn run() {
                     move |app_handle: &tauri::AppHandle, _shortcut, event| {
                         if event.state == ShortcutState::Pressed {
                             run_hotkey_action("global_shortcut_toggle_panel", || {
-                                if main_window_is_visible(app_handle) {
-                                    hide_main_window(app_handle);
-                                } else {
-                                    show_main_window(app_handle, MainWindowShowMode::Overlay);
-                                }
+                                toggle_main_window(app_handle);
                             });
                         }
                     },

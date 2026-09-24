@@ -142,10 +142,17 @@ pub fn init_native_panel(app: &tauri::AppHandle) -> Result<(), String> {
             let _: () = msg_send![panel, setDelegate: delegate];
             PANEL_DELEGATE_PTR.store(delegate as *mut std::ffi::c_void, Ordering::Release);
 
-            // ★ 核心：将 contentView 从 Tauri NSWindow 移植到 NSPanel
+            // 将 contentView 从 Tauri NSWindow 移植到 NSPanel。
+            // Tao 的 NSWindow delegate 在屏幕/缩放比例变化时仍会读取原窗口的
+            // contentView，并对 None 执行 unwrap；留下空窗口会在该回调中直接 abort。
+            // 因此给原窗口保留一个同尺寸的占位 NSView。
             let content_view: id = ns_window.contentView();
+            let placeholder_frame: NSRect = msg_send![content_view, frame];
+            let placeholder: id = msg_send![class!(NSView), alloc];
+            let placeholder: id = msg_send![placeholder, initWithFrame: placeholder_frame];
             let _: () = msg_send![content_view, retain];
-            let _: () = msg_send![ns_window, setContentView: nil];
+            let _: () = msg_send![ns_window, setContentView: placeholder];
+            let _: () = msg_send![placeholder, release];
             panel.setContentView_(content_view);
             let _: () = msg_send![content_view, release];
 
