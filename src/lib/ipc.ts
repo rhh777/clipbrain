@@ -392,6 +392,11 @@ export async function reloadPlugins(): Promise<number> {
 
 // --- 图片 ---
 
+/** 读取列表缩略图，原图保持不变 */
+export async function readImageThumbnail(path: string): Promise<string> {
+  return invoke("read_image_thumbnail", { path });
+}
+
 /** 读取图片文件并返回 base64 data URL */
 export async function readImageBase64(path: string): Promise<string> {
   return invoke("read_image_base64", { path });

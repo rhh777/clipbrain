@@ -1,5 +1,6 @@
-import { Component, createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { getAppIcon, readImageBase64, type ClipboardHistoryItem } from "../lib/ipc";
+import { Component, createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { type ClipboardHistoryItem } from "../lib/ipc";
+import { loadAppIcon, loadImageThumbnail } from "../lib/media";
 import { t } from "../lib/i18n";
 
 /** 内容类型 → 显示标签 */
@@ -72,10 +73,6 @@ interface HistoryListProps {
   onDoubleClick?: (item: ClipboardHistoryItem) => void;
 }
 
-/** 应用图标缓存（app name → asset URL） */
-const iconCache = new Map<string, string | null>();
-const itemMediaSlotClass = "h-8 w-10 shrink-0";
-
 const useVisibility = () => {
   const [visible, setVisible] = createSignal(false);
   let ref: HTMLDivElement | undefined;
@@ -88,10 +85,7 @@ const useVisibility = () => {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setVisible(true);
-          observer.disconnect();
-        }
+        setVisible(entries.some((entry) => entry.isIntersecting));
       },
       { rootMargin: "120px" }
     );
@@ -109,23 +103,11 @@ const AppIcon: Component<{ appName: string | null }> = (props) => {
 
   createEffect(() => {
     const name = props.appName;
+    setIconUrl(null);
     if (!name || !visible()) return;
-
-    const cached = iconCache.get(name);
-    if (cached !== undefined) {
-      setIconUrl(cached);
-      return;
-    }
-
-    getAppIcon(name)
-      .then((dataUrl) => {
-        iconCache.set(name, dataUrl);
-        setIconUrl(dataUrl);
-      })
-      .catch(() => {
-        iconCache.set(name, null);
-        setIconUrl(null);
-      });
+    let cancelled = false;
+    onCleanup(() => { cancelled = true; });
+    loadAppIcon(name).then((url) => { if (!cancelled) setIconUrl(url); });
   });
 
   return (
@@ -153,30 +135,21 @@ const AppIcon: Component<{ appName: string | null }> = (props) => {
   );
 };
 
-const imageThumbCache = new Map<string, string | null>();
-
 const ImageThumbnail: Component<{ imagePath: string }> = (props) => {
   const [dataUrl, setDataUrl] = createSignal<string | null>(null);
   const { visible, setRef } = useVisibility();
 
   createEffect(() => {
     const path = props.imagePath;
+    setDataUrl(null);
     if (!visible()) return;
-    const cached = imageThumbCache.get(path);
-    if (cached !== undefined) {
-      setDataUrl(cached);
-      return;
-    }
-
-    readImageBase64(path)
+    let cancelled = false;
+    onCleanup(() => { cancelled = true; });
+    loadImageThumbnail(path)
       .then((url) => {
-        imageThumbCache.set(path, url);
-        setDataUrl(url);
+        if (!cancelled) setDataUrl(url);
       })
-      .catch(() => {
-        imageThumbCache.set(path, null);
-        setDataUrl(null);
-      });
+      .catch(() => { if (!cancelled) setDataUrl(null); });
   });
 
   return (
@@ -202,14 +175,37 @@ const ImageThumbnail: Component<{ imagePath: string }> = (props) => {
 
 const HistoryList: Component<HistoryListProps> = (props) => {
   let listRef: HTMLDivElement | undefined;
+  const [scrollTop, setScrollTop] = createSignal(0);
+  const [viewportHeight, setViewportHeight] = createSignal(600);
+  const rowHeight = createMemo(() => props.showItemMeta !== false ? 60 : 52);
+  const firstIndex = createMemo(() => Math.max(0, Math.min(
+    Math.floor(scrollTop() / rowHeight()) - 4,
+    Math.max(0, props.items.length - 1),
+  )));
+  const endIndex = createMemo(() => Math.min(props.items.length,
+    firstIndex() + Math.ceil(viewportHeight() / rowHeight()) + 8));
+  const visibleItems = createMemo(() => props.items.slice(firstIndex(), endIndex()));
 
-  // 自动滚动到选中项
+  onMount(() => {
+    if (!listRef) return;
+    const resize = new ResizeObserver(() => setViewportHeight(listRef!.clientHeight));
+    resize.observe(listRef);
+    setViewportHeight(listRef.clientHeight);
+    onCleanup(() => resize.disconnect());
+  });
+
+  // Scroll by row position, including selections outside the rendered window.
   createEffect(() => {
     const idx = props.selectedIndex;
-    if (listRef) {
-      const el = listRef.querySelector(`[data-index="${idx}"]`);
-      el?.scrollIntoView({ block: "nearest" });
+    props.selectedId;
+    const height = rowHeight();
+    if (!listRef || idx < 0) return;
+    const top = idx * height;
+    if (top < listRef.scrollTop) listRef.scrollTop = top;
+    else if (top + height > listRef.scrollTop + listRef.clientHeight) {
+      listRef.scrollTop = top + height - listRef.clientHeight;
     }
+    setScrollTop(listRef.scrollTop);
   });
 
   return (
@@ -219,7 +215,7 @@ const HistoryList: Component<HistoryListProps> = (props) => {
       }`}
     >
       {/* 列表 */}
-      <div ref={listRef} class="flex-1 overflow-y-auto">
+      <div ref={listRef} class="flex-1 min-h-0 overflow-y-auto" onScroll={() => setScrollTop(listRef!.scrollTop)}>
         <Show
           when={props.items.length > 0}
           fallback={
@@ -234,18 +230,21 @@ const HistoryList: Component<HistoryListProps> = (props) => {
           }
         >
           <div>
-            <For each={props.items}>
-              {(item, index) => {
+            <div style={{ height: `${firstIndex() * rowHeight()}px` }} aria-hidden="true" />
+            <For each={visibleItems()}>
+              {(item, windowIndex) => {
+                const index = () => firstIndex() + windowIndex();
                 const isSelected = () => props.selectedId === item.id;
 
                 return (
                   <div
                     data-index={index()}
+                    style={{ height: `${rowHeight()}px` }}
                     class={`group px-2 py-1 cursor-pointer transition-colors`}
                     onClick={() => props.onSelectItem(item, index())}
                     onDblClick={() => props.onDoubleClick?.(item)}
                   >
-                    <div class={`flex items-center gap-2.5 px-2 py-1.5 rounded-lg transition-colors ${
+                    <div class={`flex h-full items-center gap-2.5 px-2 py-1.5 rounded-lg transition-colors ${
                       isSelected()
                         ? "bg-[var(--cb-selection-bg)]"
                         : "hover:bg-[var(--cb-bg-hover)]"
@@ -302,6 +301,7 @@ const HistoryList: Component<HistoryListProps> = (props) => {
                 );
               }}
             </For>
+            <div style={{ height: `${(props.items.length - endIndex()) * rowHeight()}px` }} aria-hidden="true" />
 
             {/* 加载更多 */}
             <Show when={props.hasMore}>

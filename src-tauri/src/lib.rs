@@ -595,6 +595,7 @@ pub fn run() {
             commands::action_cmds::execute_custom_stream,
             commands::stats_cmds::get_stats,
             commands::clipboard_cmds::read_image_base64,
+            commands::clipboard_cmds::read_image_thumbnail,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

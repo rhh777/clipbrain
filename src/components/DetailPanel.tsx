@@ -1,5 +1,6 @@
 import { Component, createEffect, createMemo, createSignal, For, Show, onCleanup, onMount } from "solid-js";
-import { getFilePreview, readImageBase64, type ClipboardHistoryItem, type FilePreview } from "../lib/ipc";
+import { type ClipboardHistoryItem, type FilePreview } from "../lib/ipc";
+import { loadFilePreview, loadImagePreview } from "../lib/media";
 import type { ActionDescriptor, ActionOutput } from "../types/clipboard";
 import TagEditor from "./TagEditor";
 import { t } from "../lib/i18n";
@@ -78,20 +79,21 @@ interface DetailPanelProps {
   clearInputToken: number;
 }
 
-const detailImageCache = new Map<string, string | null>();
-const filePreviewCache = new Map<string, FilePreview | null>();
-
 const ImagePreview: Component<{ imagePath: string }> = (props) => {
   const [dataUrl, setDataUrl] = createSignal<string | null>(null);
 
   createEffect(() => {
     const path = props.imagePath;
+    setDataUrl(null);
     if (!path) return;
-    const cached = detailImageCache.get(path);
-    if (cached !== undefined) { setDataUrl(cached); return; }
-    readImageBase64(path)
-      .then((url) => { detailImageCache.set(path, url); setDataUrl(url); })
-      .catch(() => { detailImageCache.set(path, null); });
+    let cancelled = false;
+    // Rapid keyboard navigation should not read every original along the way.
+    const timer = window.setTimeout(() => {
+      loadImagePreview(path)
+        .then((url) => { if (!cancelled) setDataUrl(url); })
+        .catch(() => { if (!cancelled) setDataUrl(null); });
+    }, 80);
+    onCleanup(() => { cancelled = true; window.clearTimeout(timer); });
   });
 
   return (
@@ -162,21 +164,14 @@ const FilePreviewCard: Component<{ path: string }> = (props) => {
 
   createEffect(() => {
     const path = props.path;
-    const cached = filePreviewCache.get(path);
-    if (cached !== undefined) {
-      setPreview(cached);
-      return;
-    }
-
-    getFilePreview(path)
+    setPreview(null);
+    let cancelled = false;
+    onCleanup(() => { cancelled = true; });
+    loadFilePreview(path)
       .then((result) => {
-        filePreviewCache.set(path, result);
-        setPreview(result);
+        if (!cancelled) setPreview(result);
       })
-      .catch(() => {
-        filePreviewCache.set(path, null);
-        setPreview(null);
-      });
+      .catch(() => { if (!cancelled) setPreview(null); });
   });
 
   return (

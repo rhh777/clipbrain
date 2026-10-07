@@ -192,7 +192,18 @@ pub struct ClipboardResult {
     pub content_type: ContentType,
 }
 
-/// 读取图片文件并返回 base64 data URL
+/// 生成列表缩略图；原图保持不变
+#[tauri::command]
+pub async fn read_image_thumbnail(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let data = crate::clipboard::thumbnail::read_thumbnail(std::path::Path::new(&path))?;
+        Ok(format!("data:image/png;base64,{}", base64_encode(&data)))
+    })
+    .await
+    .map_err(|e| format!("Thumbnail task failed: {e}"))?
+}
+
+/// 读取原图，仅用于详情预览
 #[tauri::command]
 pub fn read_image_base64(path: String) -> Result<String, String> {
     let start = Instant::now();

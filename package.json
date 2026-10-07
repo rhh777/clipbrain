@@ -11,6 +11,7 @@
   },
   "type": "module",
   "scripts": {
+    "test": "node --test tests/*.test.ts",
     "dev": "vite",
     "build": "vite build",
     "build:mac:local": "node scripts/build-macos-local.mjs",

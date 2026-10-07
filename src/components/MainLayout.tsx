@@ -34,10 +34,11 @@ import DetailPanel from "./DetailPanel";
 import DateRangePicker from "./DateRangePicker";
 import { theme, setTheme } from "../lib/theme";
 import { t, locale } from "../lib/i18n";
+import { LruCache } from "../lib/lru-cache";
 import trayIconUrl from "../../src-tauri/icons/tray-icon@2x.png";
 
-const selectionTagCache = new Map<number, string[]>();
-const selectionActionCache = new Map<string, ActionDescriptor[]>();
+const selectionTagCache = new LruCache<number, string[]>(256, 512 * 1024, (tags) => JSON.stringify(tags).length * 2);
+const selectionActionCache = new LruCache<string, ActionDescriptor[]>(64, 1024 * 1024, (actions) => JSON.stringify(actions).length * 2);
 
 const contentTypeKeys = [
   { value: undefined as string | undefined, key: "all" },
@@ -63,7 +64,7 @@ interface MainLayoutProps {
 type SlashFilterOption =
   | { kind: "reset"; group: "reset"; label: string; description: string }
   | { kind: "tag"; group: "tag"; value: string; label: string; description: string }
-  | { kind: "contentType"; group: "type"; value: ContentType; label: string; description: string }
+  | { kind: "contentType"; group: "type"; value: ContentType["type"]; label: string; description: string }
   | { kind: "favorite"; group: "status"; label: string; description: string };
 
 const MainLayout: Component<MainLayoutProps> = (props) => {
@@ -172,7 +173,7 @@ const MainLayout: Component<MainLayoutProps> = (props) => {
           }) satisfies SlashFilterOption
       );
 
-    const builtinContentTypes: ContentType[] = ["Image", "FileList"];
+    const builtinContentTypes: ContentType["type"][] = ["Image", "FileList"];
     const builtinOptions = builtinContentTypes
       .filter((contentType) => {
         if (!query) return true;

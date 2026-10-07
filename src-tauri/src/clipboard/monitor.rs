@@ -12,6 +12,20 @@ use crate::commands::action_cmds::list_actions_for_type;
 use crate::config::{manager as config_manager, privacy};
 use crate::storage::clipboard_history;
 
+#[cfg(target_os = "macos")]
+fn pasteboard_change_count() -> Option<isize> {
+    #[allow(deprecated, unexpected_cfgs)]
+    objc::rc::autoreleasepool(|| unsafe {
+        use cocoa::base::{id, nil};
+        use objc::{class, msg_send, sel, sel_impl};
+        let pasteboard: id = msg_send![class!(NSPasteboard), generalPasteboard];
+        if pasteboard == nil {
+            return None;
+        }
+        Some(msg_send![pasteboard, changeCount])
+    })
+}
+
 /// 获取当前前台应用名称（macOS）
 /// 优先返回 .app bundle 的显示名（如 "IntelliJ IDEA"），回退到进程名。
 #[cfg(target_os = "macos")]
@@ -121,6 +135,8 @@ pub struct ClipboardChangeEvent {
 pub struct ClipboardMonitor {
     last_content: Arc<Mutex<String>>,
     last_image_hash: Arc<Mutex<String>>,
+    #[cfg(target_os = "macos")]
+    last_image_change_count: Arc<Mutex<Option<isize>>>,
     last_file_list_signature: Arc<Mutex<String>>,
     last_change: Arc<Mutex<Instant>>,
     debounce_ms: u64,
@@ -132,6 +148,8 @@ impl ClipboardMonitor {
         Self {
             last_content: Arc::new(Mutex::new(String::new())),
             last_image_hash: Arc::new(Mutex::new(String::new())),
+            #[cfg(target_os = "macos")]
+            last_image_change_count: Arc::new(Mutex::new(None)),
             last_file_list_signature: Arc::new(Mutex::new(String::new())),
             last_change: Arc::new(Mutex::new(Instant::now())),
             debounce_ms,
@@ -167,6 +185,14 @@ impl ClipboardMonitor {
 
     /// 读取当前剪贴板图片，如果与上次不同则返回 Some((width, height, rgba_bytes, hash))
     pub fn poll_image(&self) -> Option<(u32, u32, Vec<u8>, String)> {
+        #[cfg(target_os = "macos")]
+        let change_count = {
+            let count = pasteboard_change_count();
+            if count.is_some() && *self.last_image_change_count.lock().ok()? == count {
+                return None;
+            }
+            count
+        };
         let mut clipboard = arboard::Clipboard::new().ok()?;
         let img = clipboard.get_image().ok()?;
 
@@ -183,6 +209,10 @@ impl ClipboardMonitor {
         let mut last_time = self.last_change.lock().ok()?;
 
         if *last_hash == hash {
+            #[cfg(target_os = "macos")]
+            {
+                *self.last_image_change_count.lock().ok()? = change_count;
+            }
             return None;
         }
 
@@ -190,6 +220,11 @@ impl ClipboardMonitor {
             return None;
         }
 
+        // Mark only successfully handled images; failed or debounced reads can retry.
+        #[cfg(target_os = "macos")]
+        {
+            *self.last_image_change_count.lock().ok()? = change_count;
+        }
         *last_hash = hash;
         *last_time = Instant::now();
         Some((
@@ -275,7 +310,8 @@ impl ClipboardMonitor {
                             println!("[ClipBrain] 检测到剪贴板图片: {}x{}", width, height);
 
                             // 保存为 PNG
-                            match save_image_to_file(width, height, &rgba, &image_hash) {
+                            let saved = save_image_to_file(width, height, rgba, &image_hash);
+                            match saved {
                                 Ok(image_path) => {
                                     let source_app = get_frontmost_app_cached();
                                     let content_type_str = format!("{:?}", ContentType::Image);
@@ -506,7 +542,7 @@ impl ClipboardMonitor {
 fn save_image_to_file(
     width: u32,
     height: u32,
-    rgba: &[u8],
+    rgba: Vec<u8>,
     image_hash: &str,
 ) -> Result<String, String> {
     let dir = dirs::home_dir()
@@ -522,7 +558,7 @@ fn save_image_to_file(
         return Ok(path.to_string_lossy().to_string());
     }
 
-    let img = image::RgbaImage::from_raw(width, height, rgba.to_vec())
+    let img = image::RgbaImage::from_raw(width, height, rgba)
         .ok_or("Invalid RGBA image data")?;
     img.save(&path)
         .map_err(|e| format!("Save PNG failed: {}", e))?;
